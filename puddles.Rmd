@@ -1,0 +1,173 @@
+---
+title: "Projeto Peppa Pig"
+output: html_notebook
+---
+
+## Análise de uma UG.
+
+```{r, fig.height= 20}
+library(tidyverse)
+library(readxl)
+library(extrafont)
+loadfonts()
+
+tema <- function(){
+    theme_minimal() +
+    theme(
+      text = element_text(family = "Source Sans Pro", colour = "grey20"),
+      axis.text = element_text(family = "Source Sans Pro", colour = "grey20"),
+      title = element_text(face = "bold"),
+      plot.subtitle = element_text(face = "plain"),
+      plot.caption = element_text(face = "italic"),
+      panel.grid.major = element_blank(), 
+      panel.grid.minor = element_blank(),
+      legend.text = element_text(size = 8),
+      legend.title = element_text(size = 8),
+      axis.ticks.x = element_line(),
+      legend.position = 'bottom')
+}
+
+dados <- read_excel('data/ExecucaoSNH.xlsx', skip = 8)
+
+dados_fin <- dados %>% 
+  filter(`Item Informação` == "LIMITES DE SAQUE (OFSS, DIVIDA, BACEN E PREV)" &
+           `Fonte Recursos Detalhada Código` %in% c("0100000000", "0300000000")) %>%
+  mutate(TipoDoc  = substr(Documento, 16, 17),
+         TipoMov  = ifelse(`Saldo R$ (Item Informação)` > 0, "Recebimentos", "Pagamentos"),
+         data_num = factor(ifelse(str_sub(`Dia Lançamento`, 1, 3) == "000", paste0(str_sub(`Dia Lançamento`, 5, 8), "0000"),
+                           paste0(str_sub(`Dia Lançamento`, 7, 10), 
+                                 str_sub(`Dia Lançamento`, 4, 5), 
+                                 str_sub(`Dia Lançamento`, 1, 2))))) %>%
+  group_by(data_num, TipoMov) %>%
+  summarise(valor = sum(`Saldo R$ (Item Informação)`)) %>%
+  spread(key = TipoMov, value = valor, fill = 0) %>%
+  arrange(data_num) %>%
+  ungroup() %>% # sem esse ungroup ele não calcula o cumsum corretamente, ele vai continuar calculando por data_num.
+  mutate(MovLiq = Recebimentos + Pagamentos,
+         saldo = cumsum(MovLiq),
+         saldo_anterior = lag(saldo))
+
+dados_fin_receb <- dados_fin %>%
+  mutate(ptoFinal_receb = ifelse(data_num == "20180000", saldo, saldo_anterior + Recebimentos)) %>%
+  select(data_num, saldo_anterior, ptoFinal_receb) %>%
+  gather(saldo_anterior, ptoFinal_receb, key = "Pontos", value = "Valor") %>%
+  arrange(data_num)
+
+dados_ini_pagto <- dados_fin %>%
+  mutate(ptoInicial_pagto = ifelse(data_num == "20180000", saldo, saldo_anterior + Recebimentos)) %>%
+  select(data_num, saldo, ptoInicial_pagto) %>%
+  gather(ptoInicial_pagto, saldo, key = "Pontos", value = "Valor") %>%
+  arrange(data_num)
+
+saldo_minimo <- min(dados_fin$saldo)
+saldo_maximo <- max(dados_fin$saldo)
+saldo_mediana <- median(dados_fin$saldo)
+y_max <- length(dados_fin$data_num)
+
+plota_linha_ref <- function(valor_ref) {
+  geom_vline(xintercept = valor_ref, linetype = "dotted") }
+
+# essa função não está funcionando, ver depois.
+plota_texto_ref <- function(valor_ref, titulo) {
+  geom_text(aes(x = valor_ref * 1.05, 
+                y = 1,
+                label = paste(titulo, format(valor_ref, big.mark = ".", decimal.mark=",", scientific = FALSE))), 
+            size = 3, 
+            hjust = 0, 
+            family = "Source Sans Pro", 
+            color = "grey20")
+}
+# I get: Error in FUN(X[[i]], ...) : object 'valor_ref' not found
+# queria substituir as chamadas repetitivas ao geom_text por chamadas a essa função
+#
+# plota_texto_ref(saldo_minimo, "Mínimo:") +
+# plota_texto_ref(saldo_maximo, "Máximo:") +  
+# plota_texto_ref(saldo_medio, "Saldo médio:") + 
+
+graf <- ggplot() +
+  geom_path(data = dados_fin_receb, aes(x = Valor, y = data_num), size = 1, color = "blue", position = position_nudge(y = 0.1)) +
+  geom_path(data = dados_ini_pagto, aes(x = Valor, y = data_num), size = 1, color = "red", position = position_nudge(y = -0.1)) +
+  geom_point(data = dados_fin, aes(x = saldo, y = data_num)) +
+  scale_y_discrete(limits = rev(dados_fin$data_num), 
+                   labels = function(x) {ifelse(str_sub(x, 5, 8) == "0000", 
+                                                "Saldo de abertura",
+                                                paste(str_sub(x, 7, 8), 
+                                                      str_sub(x, 5, 6), 
+                                                      str_sub(x, 1, 4), sep = "/"))}) +
+  scale_x_log10(labels = function(x) {format(x, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+  plota_linha_ref(saldo_minimo) +
+  geom_text(aes(x = saldo_minimo * 1.05, 
+                y = y_max,
+                label = paste("Mínimo: R$", format(saldo_minimo, big.mark = ".", decimal.mark=",", scientific = FALSE))), 
+            size = 3, 
+            hjust = 0, 
+            family = "Source Sans Pro", 
+            color = "grey20") +
+  plota_linha_ref(saldo_maximo) +
+  geom_text(aes(x = saldo_maximo * 1.05, 
+                y = y_max,
+                label = paste("Máximo: R$", format(saldo_maximo, big.mark = ".", decimal.mark=",", scientific = FALSE))), 
+            size = 3, 
+            hjust = 0, 
+            family = "Source Sans Pro", 
+            color = "grey20") +
+  plota_linha_ref(saldo_mediana) +
+  geom_text(aes(x = saldo_mediana * 1.05, 
+                y = y_max,
+                label = paste("Mediana do saldo: R$", format(saldo_mediana, big.mark = ".", decimal.mark=",", scientific = FALSE))), 
+            size = 3, 
+            hjust = 0, 
+            family = "Source Sans Pro", 
+            color = "grey20") +
+  labs(y = NULL,
+       x = "Valores em R$ (escala logarítimica)",
+       title = "Saldo diário da UG SNH",
+       subtitle = "Linhas azuis indicam os recebimentos no dia; linhas vermelhas, os pagamentos; os pontos, o saldo final do dia ") +
+  tema()
+           
+graf         
+  
+
+```
+
+## Análise para todas as UGs do Min Cidades
+
+```{r}
+dadosSiafi <- read.csv2('data/dadosSiafi.csv')
+colnames(dadosSiafi) <- c("Ano", "Mes", "Dia", "Data", "idItem", "nomeItem", "codItem", "idFonte", "codFonte", "nomeFonte", "idUG", "codUG", "nomeUG", "Movimento")
+
+dados_tratados <- dadosSiafi %>% 
+  mutate(data_num = factor(ifelse(Mes == 0, paste0(Ano, "0000"),
+                           paste0(str_sub(Data, 7, 10), 
+                                  str_sub(Data, 4, 5), 
+                                  str_sub(Data, 1, 2))))) %>%
+  group_by(data_num, codUG) %>%
+  summarise(Movimento = sum(as.numeric(as.character(Movimento)))) %>%
+  arrange(data_num) %>%
+  spread(key = codUG, value = Movimento, fill = 0) %>%
+  ungroup() %>% # sem esse ungroup ele não calcula o cumsum corretamente, ele vai continuar calculando por data_num.
+  mutate_at(-1, funs(cumsum(.))) %>%
+  gather(-1, key = "UG", value = "Saldo")
+
+dados_sumarizados <- dados_tratados %>%
+  group_by(UG) %>%
+  mutate(minimo   = min(Saldo),
+         data_min = data_num[which.min(Saldo)],
+         maximo   = max(Saldo),
+         data_max = data_num[which.max(Saldo)],
+         mediana  = median(Saldo),
+         media    = mean(Saldo)) %>%
+  ungroup()
+
+# testando os valores com o Siafi, antes do gather:
+# format(sum(dados_tratados[dados_tratados$data_num == "20180331",-1]), big.mark = ".", decimal.mark=",", scientific = FALSE)
+# "2.733.100.242"
+# format(sum(dados_tratados[dados_tratados$data_num == "20171231",-1]), big.mark = ".", decimal.mark=",", scientific = FALSE)
+# "2.729.567.322"
+
+  
+    
+
+
+```
+
