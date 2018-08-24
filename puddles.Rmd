@@ -24,6 +24,7 @@ tema <- function(){
       legend.text = element_text(size = 8),
       legend.title = element_text(size = 8),
       axis.ticks.x = element_line(),
+      axis.title = element_text(size = 7),
       legend.position = 'bottom')
 }
 
@@ -136,6 +137,13 @@ graf
 dadosSiafi <- read.csv2('data/dadosSiafi.csv')
 colnames(dadosSiafi) <- c("Ano", "Mes", "Dia", "Data", "idItem", "nomeItem", "codItem", "idFonte", "codFonte", "nomeFonte", "idUG", "codUG", "nomeUG", "Movimento")
 
+tabOrgaosSiafi <- read.csv2('data/tabelaOrgao.csv')
+
+tabOrgaos <- tabOrgaosSiafi %>%
+  mutate(UG = as.character(ID_UG),
+         Orgao = paste(ID_ORGAO, NO_ORGAO, sep = " - ")) %>%
+  select(UG, Orgao)
+
 dados_tratados <- dadosSiafi %>% 
   mutate(data_num = factor(ifelse(Mes == 0, paste0(Ano, "0000"),
                            paste0(str_sub(Data, 7, 10), 
@@ -147,17 +155,41 @@ dados_tratados <- dadosSiafi %>%
   spread(key = codUG, value = Movimento, fill = 0) %>%
   ungroup() %>% # sem esse ungroup ele não calcula o cumsum corretamente, ele vai continuar calculando por data_num.
   mutate_at(-1, funs(cumsum(.))) %>%
-  gather(-1, key = "UG", value = "Saldo")
+  gather(-1, key = "UG", value = "Saldo") # (1)
+
+
+# (1) esse "-1" quer dizer que quero juntar todas as colunas, com exceção da primeira.
+
 
 dados_sumarizados <- dados_tratados %>%
+  mutate(Saldo = ifelse(Saldo < 1, NA, Saldo)) %>% # (1)
+  filter(!is.na(Saldo)) %>%                        # (1)
+  left_join(tabOrgaos) %>%  
   group_by(UG) %>%
-  mutate(minimo   = min(Saldo),
+  mutate(minimo   = min(Saldo, na.rm = TRUE),
          data_min = data_num[which.min(Saldo)],
-         maximo   = max(Saldo),
+         maximo   = max(Saldo, na.rm = TRUE),
          data_max = data_num[which.max(Saldo)],
-         mediana  = median(Saldo),
+         mediana  = median(Saldo, na.rm = TRUE),
          media    = mean(Saldo)) %>%
-  ungroup()
+  ungroup() %>%
+  arrange(str_sub(Orgao, 1, 5), minimo) %>%
+  mutate(UG = factor(UG),
+         UG = fct_reorder(UG, as.numeric(str_sub(Orgao, 1, 5))),
+         data_num = as.numeric(as.character(data_num)))
+
+# (1) para remover saldos que começaram o período zerados
+
+# agora as UGs estão ordenadas por Orgão.
+
+lista_UGs <- dados_sumarizados %>%
+  arrange(Orgao, desc(UG)) %>%
+  group_by(Orgao) %>%
+  summarise(PrimeiraUG = first(UG))
+
+dados_sumarizados <- dados_sumarizados %>%
+  left_join(lista_UGs)
+
 
 # testando os valores com o Siafi, antes do gather:
 # format(sum(dados_tratados[dados_tratados$data_num == "20180331",-1]), big.mark = ".", decimal.mark=",", scientific = FALSE)
@@ -165,9 +197,93 @@ dados_sumarizados <- dados_tratados %>%
 # format(sum(dados_tratados[dados_tratados$data_num == "20171231",-1]), big.mark = ".", decimal.mark=",", scientific = FALSE)
 # "2.729.567.322"
 
-  
+# remover os valores zerados das ugs 56000X
+
+
+
+grafico <- ggplot(dados_sumarizados, na.rm = TRUE, aes(y = ifelse(Saldo < 1, 1, Saldo), x = UG)) +
+  geom_ribbon(ymin = 0.001, ymax = 1000000, aes(fill = Orgao, group = Orgao), alpha = 0.2) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.5, fill = "yellow") +
+  geom_jitter(shape = 21, fill = "grey70", stroke = 0, alpha = 0.9, 
+              position = position_jitter(width=0.1, height = 0)) +
+  coord_flip() +
+  geom_text(aes(label = ifelse(UG == PrimeiraUG, Orgao, ""), y = 1), size = 2,
+            family = "Source Sans Pro",
+            color = "grey50",
+            hjust = 0) + 
+  geom_hline(yintercept = min(dados_sumarizados$Saldo), linetype = "dotted") +
+  geom_hline(yintercept = median(dados_sumarizados$Saldo), linetype = "dotted") +
+  annotate(geom = "text", x = 24, y = min(dados_sumarizados$Saldo), 
+           label = paste("Mínimo geral: ", 
+                         format(round(min(dados_sumarizados$Saldo),0), 
+                                big.mark = ".", decimal.mark = ",")),
+           color = "grey50", size = 2, hjust = 0,
+           fontface = "italic", family = "Source Sans Pro") +
+  annotate(geom = "text", x = 24, y = median(dados_sumarizados$Saldo), 
+           label = paste("Mediana geral: ", 
+                         format(round(median(dados_sumarizados$Saldo),0), 
+                                big.mark = ".", decimal.mark = ",")),
+           color = "grey50", size = 2, hjust = 0,
+           fontface = "italic", family = "Source Sans Pro") +
+  scale_y_log10(labels = function(x) {format(x, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+  expand_limits(x = c(0,25)) +
+  labs(y = "Valores em R$ (escala logarítmica)",
+       x = NULL) +
+  tema() + theme(legend.position = "none")
+
     
 
+#gganimate... descobrir como funciona
 
+# ggplot(dados_sumarizados %>% filter(data_num < "20170428"), aes(y = ifelse(Saldo == 0, 1, Saldo), x = UG)) +
+#   geom_bar(stat = "sum", width=0.7, color = "white", size = 1, fill = "lightblue", alpha = 0.5) + 
+#   geom_point(color = "grey70", fill = "grey70", alpha = 0.5) + 
+#   coord_flip() +
+#   scale_y_log10(labels = function(x) {format(x, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+#   labs(y = "Valores em R$ (escala logarítmica)",
+#        x = NULL) +
+#   tema() +
+#   transition_states(
+#     data_num,
+#     transition_length = 1,
+#     state_length = 1
+#   ) +
+#   shadow_mark(past = TRUE)
+
+
+
+```
+
+Testando gganimate
+
+```{r}
+
+library(gganimate)
+devtools::install_github('thomasp85/gganimate')
+
+ggplot(mtcars, aes(factor(cyl), mpg)) + 
+  geom_boxplot() + 
+  # Here comes the gganimate code
+  transition_states(
+    gear,
+    transition_length = 2,
+    state_length = 1
+  ) +
+  enter_fade() + 
+  exit_shrink() +
+  ease_aes('sine-in-out')
+
+```
+
+
+```{r}
+library(gapminder)
+
+ggplot(gapminder, aes(gdpPercap, lifeExp, size = pop, colour = country)) +
+  geom_point(alpha = 0.7, show.legend = FALSE) +
+  scale_colour_manual(values = country_colors) +
+  scale_size(range = c(2, 12)) +
+  scale_x_log10() +
+  facet_wrap(~continent) 
 ```
 
