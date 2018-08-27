@@ -1,11 +1,20 @@
 ---
 title: "Projeto Peppa Pig"
-output: html_notebook
+output:
+  html_document: 
+    df_print: paged
 ---
 
-## Análise de uma UG.
+```{css, echo=FALSE}
+* {
+  font-family: "Source Sans Pro";
+}
+```
 
-```{r, fig.height= 20}
+
+## Análise de uma UG
+
+```{r fig.height=20, fig.width=11, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(readxl)
 library(extrafont)
@@ -250,40 +259,51 @@ grafico <- ggplot(dados_sumarizados, na.rm = TRUE, aes(y = ifelse(Saldo < 1, 1, 
 #   ) +
 #   shadow_mark(past = TRUE)
 
-
-
-```
-
-Testando gganimate
-
-```{r}
-
-library(gganimate)
-devtools::install_github('thomasp85/gganimate')
-
-ggplot(mtcars, aes(factor(cyl), mpg)) + 
-  geom_boxplot() + 
-  # Here comes the gganimate code
-  transition_states(
-    gear,
-    transition_length = 2,
-    state_length = 1
-  ) +
-  enter_fade() + 
-  exit_shrink() +
-  ease_aes('sine-in-out')
+grafico
 
 ```
 
+Raster?
 
 ```{r}
-library(gapminder)
+graf2 <- ggplot(dados_sumarizados, na.rm = TRUE, aes(y = ifelse(Saldo < 1, 1, Saldo), x = UG)) +
+  geom_ribbon(ymin = 0.001, ymax = 1000000, aes(fill = Orgao, group = Orgao), alpha = 0.25) +
+  #geom_boxplot(outlier.shape = NA, alpha = 0.5, fill = "yellow") +
+  geom_tile(aes(y = round(Saldo,0)), fill = "firebrick", alpha = 0.1, width = 1, height = 0.01) +
+  coord_flip() +
+  geom_text(aes(label = ifelse(UG == PrimeiraUG, Orgao, ""), y = 1), size = 2,
+            family = "Source Sans Pro",
+            color = "grey50",
+            hjust = 0) + 
+  geom_hline(yintercept = min(dados_sumarizados$Saldo), linetype = "dotted") +
+  geom_hline(yintercept = median(dados_sumarizados$Saldo), linetype = "dotted") +
+  annotate(geom = "text", x = 24, y = min(dados_sumarizados$Saldo), 
+           label = paste("Mínimo geral: ", 
+                         format(round(min(dados_sumarizados$Saldo),0), 
+                                big.mark = ".", decimal.mark = ",")),
+           color = "grey50", size = 2, hjust = 0,
+           fontface = "italic", family = "Source Sans Pro") +
+  annotate(geom = "text", x = 24, y = median(dados_sumarizados$Saldo), 
+           label = paste("Mediana geral: ", 
+                         format(round(median(dados_sumarizados$Saldo),0), 
+                                big.mark = ".", decimal.mark = ",")),
+           color = "grey50", size = 2, hjust = 0,
+           fontface = "italic", family = "Source Sans Pro") +
+  scale_y_log10(labels = function(x) {format(x, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+  expand_limits(x = c(0,25)) +
+  labs(y = "Valores em R$ (escala logarítmica)",
+       x = NULL,
+       title = "Saldos diários das UGs do Ministério da Cidades",
+       subtitle = "Período de janeiro de 2017 a julho de 2018") +
+  tema() + theme(legend.position = "none")
 
-ggplot(gapminder, aes(gdpPercap, lifeExp, size = pop, colour = country)) +
-  geom_point(alpha = 0.7, show.legend = FALSE) +
-  scale_colour_manual(values = country_colors) +
-  scale_size(range = c(2, 12)) +
-  scale_x_log10() +
-  facet_wrap(~continent) 
+graf2
+```
+
+```{r}
+
+```
+
+
 ```
 
