@@ -24,6 +24,9 @@ body {
 library(tidyverse)
 library(readxl)
 library(extrafont)
+library(kableExtra)
+library(lubridate)
+library(gganimate)
 loadfonts()
 
 tema <- function(){
@@ -42,24 +45,121 @@ tema <- function(){
       axis.title = element_text(size = 7),
       legend.position = 'bottom')
 }
-
-dados <- read_excel('data/ExecucaoSNH.xlsx', skip = 8)
-
 ```
-
 
 ## Dados Siafi
 
-### Para a análise de uma UG
-
 ```{r}
-library(kableExtra)
-head(dados, 10) %>% 
+
+dados_Siafi <- read.csv2('data/dadosMCTI.csv')
+colnames(dados_Siafi) <- c("Ano", "Mes", "Dia", "Data", 
+                           "idItem", "nomeItem", "codItem", 
+                           "idOrgao", "codOrgao", "nomeOrgao", 
+                           "Movimento")
+
+head(dados_Siafi, 5) %>% 
   kable("html", format.args = list(big.mark=".", decimal.mark=",")) %>%
   kable_styling(bootstrap_options = c("striped", "hover"))
 ```
 
-## Análise de uma UG
+## Análise
+
+```{r}
+
+# vamos criar primeiro a coluna no formato de data, tratando os meses de abertura
+
+dados_com_data <- dados_Siafi %>% 
+  mutate(Date = if_else(Mes == 0, ymd(paste0(Ano,"-01-01")), dmy(Data))) # (1)
+
+# ou:
+# mutate(Date = if_else(Mes == 0, as.Date(paste0(Ano,"-01-01")), 
+#                       as.Date(paste(Ano, Mes, Dia, sep = "-"))))
+
+# (1) tem que usar o dplyr::if_else senão o ifelse muda o tipo do dado! :/
+
+
+# vou criar uma tabelinha com os códigos e nomes dos órgãos para posteriormente levar essas informações à tabela processada
+
+nomes_orgaos <- data.frame("codOrgao" = factor(unique(dados_Siafi$codOrgao)), "nomeOrgao" = factor(unique(dados_Siafi$nomeOrgao)))
+
+
+# em seguida, vamos tratar os dados. comentarios nas notas de cada linha
+
+dados <- dados_com_data %>%
+  group_by(Date, codOrgao) %>%
+  summarise(Movimento = sum(as.numeric(as.character(Movimento)))) %>% # (1)
+  ungroup() %>% # (2)
+  select(Date, codOrgao, Movimento) %>% # (3)
+  spread(key = codOrgao, value = Movimento, fill = 0) %>% # (4)
+  arrange(Date) %>% # (5)
+  complete(Date = seq(min(dados$Date), max(dados$Date), by = "days")) %>% # (6)
+  replace(is.na(.), 0) %>% # (7)
+  mutate_at(-1, funs(cumsum(.))) %>% # (8)
+  gather(-1, key = "codOrgao", value = "Saldo") %>% # (9)
+  left_join(nomes_orgaos) %>% # (10)
+  mutate(Orgao = paste(codOrgao, nomeOrgao, sep = " - "))
+
+# (1) esse group_by com summarise é para somar eventuais registros repetidos. Ou seja, preciso ficar com um movimento para cada dia, para cada orgao. como atribuí que o saldo de abertura seria um movimento no dia 01/01, e tinha um caso em que havia de fato movimento no dia 01/01 em um orgao, apareciam dois registros no dia 01/01 nesse orgao. o summarise elimina esse problema.
+
+# (2) por um motivo que ainda não entendo, sem esse ungroup ele não calcula o cumsum corretamente.
+
+# (3) estou pegando apenas o essencial para que minha planilha fique com apenas uma linha por data, quando eu fizer o spread. depois trago os nomes dos órgãos de novo via join, se for necessário.
+
+# (4) com o spread, um orgao que eventualmente não possuía movimento em determinado dia vai aparecer com "NA". Preenchi com 0 pq depois vou usar o cumsum para calcular os saldos.
+
+# (5) classificando por data para o cumsum ter o significado que quero: saldos acumulados diários.
+
+# (6) o complete vai completar as datas faltantes considerando a sequencia de dias entre o menor e o maior dia presente nos dados. Os valores para esses dias faltantes serão completados com "NA", então...
+  
+# (7) o replace substitui esses NAs por 0.
+
+# (8) agora uso o cumsum para calcular os totais acumulados em cada coluna (que neste ponto se referem a cada órgão.) usei o -1 na referência do mutate_at para calcular essa soma acumulada para TODAS as colunas, EXCETO a primeira (pq ela é a data).
+
+# (9) agora, de maneira semelhante, uso o -1 para dizer que quero empilhar todas as colunas, exceto a primeira, que é a coluna de data.
+
+# (10) trazendo os nomes dos orgaos da tabelinha que criei antes
+
+```
+
+```{r}
+graf_estatico <- ggplot(dados, aes(y = Saldo, x = codOrgao)) +
+  geom_tile(aes(y = round(Saldo,0)), fill = "firebrick", alpha = 0.1, width = 1, height = 0.01) +
+  coord_flip() +
+  geom_hline(yintercept = min(dados$Saldo), linetype = "dotted") +
+  geom_hline(yintercept = median(dados$Saldo), linetype = "dotted") +
+  annotate(geom = "text", x = length(unique(dados$Orgao)) + 1, y = min(dados$Saldo), 
+           label = paste("Mínimo geral: ", 
+                         format(round(min(dados$Saldo),0), 
+                                big.mark = ".", decimal.mark = ",")),
+           color = "grey50", size = 2, hjust = 0,
+           family = "Source Sans Pro") +
+  annotate(geom = "text", x = length(unique(dados$Orgao)) + 1, y = median(dados$Saldo), 
+           label = paste("Mediana geral: ", 
+                         format(round(median(dados$Saldo),0), 
+                                big.mark = ".", decimal.mark = ",")),
+           color = "grey50", size = 2, hjust = 0,
+           family = "Source Sans Pro") +
+  scale_y_log10(labels = function(x) {format(x, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+  labs(y = "Valores em R$ (escala logarítmica)",
+       x = NULL,
+       title = "Saldos diários dos órgãos do Ministério da Ciência e Tecnologia",
+       subtitle = "Período de janeiro de 2017 a agosto de 2018") +
+  tema() + theme(legend.position = "none")
+
+graf_estatico
+```
+
+```{r}
+graf_estatico +
+ +
+  labs(subtitle = "Posição em {frame_time}") +
+  tema() + theme(legend.position = "none") +
+  transition_time(Date) +
+  ease_aes('linear')
+```
+
+
+
 
 ```{r fig.height=20, fig.width=11, message=FALSE, warning=FALSE}
 dados_fin <- dados %>% 
@@ -499,4 +599,9 @@ y = dados_ts$`175004`
 ### Descobertas, aprendizados, recursos interessantes
 
 * https://github.com/htmlwidgets/sparkline
-* `cumSum()`, `lag()`
+* `cumsum()`, `lag()`
+* https://stackoverflow.com/questions/41668795/using-mutate-with-dates-gives-numerical-values
+* ou seja, o `ifelse` muda o tipo do dado... o `if_else` do `dplyr`, não.
+* para completar um período de dias: https://blog.exploratory.io/populating-missing-dates-with-complete-and-fill-functions-in-r-and-exploratory-79f2a321e6b5
+* `complete`, do tidyr
+* animações: https://www.idg.tv/video/89987/r-tip-animations-in-r
