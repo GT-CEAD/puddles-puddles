@@ -27,6 +27,7 @@ library(extrafont)
 library(kableExtra)
 library(lubridate)
 library(gganimate)
+library(scales)
 loadfonts()
 
 tema <- function(){
@@ -49,6 +50,8 @@ tema <- function(){
 
 ## Dados Siafi
 
+Uma visão geral da estrutura dos dados do Siafi que serão utilizados.
+
 ```{r}
 
 dados_Siafi <- read.csv2('data/dadosMCTI.csv')
@@ -62,30 +65,16 @@ head(dados_Siafi, 5) %>%
   kable_styling(bootstrap_options = c("striped", "hover"))
 ```
 
-## Análise
+## Análise geral dos órgão do MCTI
+
+Vamos tratar os dados para obter uma matriz com os saldos diários para todo o período considerado, por órgão do MCTI.
 
 ```{r}
 
-# vamos criar primeiro a coluna no formato de data, tratando os meses de abertura
+# vamos tratar os dados. comentarios nas notas de cada linha
 
-dados_com_data <- dados_Siafi %>% 
-  mutate(Date = if_else(Mes == 0, ymd(paste0(Ano,"-01-01")), dmy(Data))) # (1)
-
-# ou:
-# mutate(Date = if_else(Mes == 0, as.Date(paste0(Ano,"-01-01")), 
-#                       as.Date(paste(Ano, Mes, Dia, sep = "-"))))
-
-# (1) tem que usar o dplyr::if_else senão o ifelse muda o tipo do dado! :/
-
-
-# vou criar uma tabelinha com os códigos e nomes dos órgãos para posteriormente levar essas informações à tabela processada
-
-nomes_orgaos <- data.frame("codOrgao" = factor(unique(dados_Siafi$codOrgao)), "nomeOrgao" = factor(unique(dados_Siafi$nomeOrgao)))
-
-
-# em seguida, vamos tratar os dados. comentarios nas notas de cada linha
-
-dados <- dados_com_data %>%
+dados <- dados_Siafi %>%
+  mutate(Date = if_else(Mes == 0, ymd(paste0(Ano,"-01-01")), dmy(Data))) %>% # (0)
   group_by(Date, codOrgao) %>%
   summarise(Movimento = sum(as.numeric(as.character(Movimento)))) %>% # (1)
   ungroup() %>% # (2)
@@ -95,9 +84,14 @@ dados <- dados_com_data %>%
   complete(Date = seq(min(dados$Date), max(dados$Date), by = "days")) %>% # (6)
   replace(is.na(.), 0) %>% # (7)
   mutate_at(-1, funs(cumsum(.))) %>% # (8)
-  gather(-1, key = "codOrgao", value = "Saldo") %>% # (9)
-  left_join(nomes_orgaos) %>% # (10)
-  mutate(Orgao = paste(codOrgao, nomeOrgao, sep = " - "))
+  gather(-1, key = "codOrgao", value = "Saldo") # (9)
+
+# (0) criar primeiro a coluna no formato de data, tratando os meses de abertura. importante: tem que usar o dplyr::if_else senão o ifelse muda o tipo do dado! :/
+
+# poderia ter usado também:
+
+# mutate(Date = if_else(Mes == 0, as.Date(paste0(Ano,"-01-01")), 
+#                       as.Date(paste(Ano, Mes, Dia, sep = "-"))))
 
 # (1) esse group_by com summarise é para somar eventuais registros repetidos. Ou seja, preciso ficar com um movimento para cada dia, para cada orgao. como atribuí que o saldo de abertura seria um movimento no dia 01/01, e tinha um caso em que havia de fato movimento no dia 01/01 em um orgao, apareciam dois registros no dia 01/01 nesse orgao. o summarise elimina esse problema.
 
@@ -117,13 +111,71 @@ dados <- dados_com_data %>%
 
 # (9) agora, de maneira semelhante, uso o -1 para dizer que quero empilhar todas as colunas, exceto a primeira, que é a coluna de data.
 
-# (10) trazendo os nomes dos orgaos da tabelinha que criei antes
+```
+Em seguida, vamos calcular alguns sumários estatísticos (mínimos, máximos, médias e medianas) por órgão, para todo o período, e vamos terminar de preparar os dados para visualizá-los.
+
+```{r}
+# criar uma tabelinha com os códigos e nomes dos órgãos para posteriormente levar essas informações à tabela processada
+
+nomes_orgaos <- data.frame(
+  "codOrgao" = factor(unique(dados_Siafi$codOrgao)),
+  "nomeOrgao" = factor(unique(dados_Siafi$nomeOrgao)),
+  "siglaOrgao" = c("FNDCT", "NUCLEBRAS", "INB", "CNDCT", "AEB", 
+                   "CNEN", "MCTI", "ANATEL", "CNTEA", "FUST", "FUNTTEL"))
+
+# elaborar sumários para gráficos (e para ordenar os órgãos por média descrescente)
+
+sumario_dados <- dados %>%
+  group_by(codOrgao) %>%
+  summarise(minimo   = min(Saldo, na.rm = TRUE),
+            data_min = Date[which.min(Saldo)],
+            maximo   = max(Saldo, na.rm = TRUE),
+            data_max = Date[which.max(Saldo)],
+            mediana  = median(Saldo, na.rm = TRUE),
+            media    = mean(Saldo)) %>%
+  ungroup() %>%
+  arrange(desc(media)) %>%
+  left_join(nomes_orgaos) %>% 
+  mutate(codOrgao   = fct_reorder(codOrgao, media, desc = TRUE), # (1)
+         nomeOrgao  = fct_reorder(nomeOrgao, media, desc = TRUE),
+         siglaOrgao = fct_reorder(siglaOrgao, media, desc = TRUE),
+         Orgao      = paste(codOrgao, nomeOrgao, sep = " - "))
+  
+dados <- dados %>%
+  left_join(sumario_dados)
+
+# (1) tem um jeito melhor de ordenar vários factors pelo mesmo critério? talvez com purr::map()...
 
 ```
 
+### Visualizações
+
+O gráfico abaixo demonstra as médias dos saldos diários da conta de limite de saque (que representa a parcela da Conta Única da União atribuida ao órgão) dos órgãos do MCTI no período considerado.
+
 ```{r}
-graf_estatico <- ggplot(dados, aes(y = Saldo, x = codOrgao)) +
-  geom_tile(aes(y = round(Saldo,0)), fill = "firebrick", alpha = 0.1, width = 1, height = 0.01) +
+ggplot(sumario_dados, aes(y = media, x = siglaOrgao)) +
+  geom_bar(stat = "identity", fill = "goldenrod", color = "white") +
+  geom_text(aes(y = media + 2000, label = paste(format(round(media/1000000,0), 
+                                big.mark = ".", decimal.mark = ","), "mi")),
+            color = "grey50", size = 2.5, 
+            hjust = 0,
+            position = "identity",
+            family = "Source Sans Pro") +
+  coord_flip() +
+  scale_y_continuous(labels = function(x) {format(x/1000000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+  labs(y = "Valores em milhões de R$",
+       x = NULL,
+       title = "Média dos saldos financeiros diários - Ministério da Ciência e Tecnologia",
+       subtitle = "Período de janeiro de 2017 a agosto de 2018") +
+  expand_limits(y = max(sumario_dados$media * 1.1)) +
+  tema() + theme(legend.position = "none")
+```
+
+O gráfico acima demonstra a média, mas para ter uma melhor ideia da distribuição desses valores no período, elaboramos o gráfico abaixo com todos os saldos diários de cada órgão do MCTI plotados. O valor do saldo financeiro para cada dia é representado por uma linha clara. Concentrações de saldos numa mesma faixa de valores produzem regiões mais escuras. O gráfico utiliza uma escala logarítmica, para permitir uma melhor visualização de todos os órgãos, em razão da discrepância dos saldos observados em cada órgão.
+
+```{r}
+graf_estatico <- ggplot(dados, aes(y = Saldo, x = siglaOrgao)) +
+  geom_tile(aes(y = round(Saldo,0)), fill = "darkgoldenrod", alpha = 0.1, width = 1, height = 0.01) +
   coord_flip() +
   geom_hline(yintercept = min(dados$Saldo), linetype = "dotted") +
   geom_hline(yintercept = median(dados$Saldo), linetype = "dotted") +
@@ -142,444 +194,146 @@ graf_estatico <- ggplot(dados, aes(y = Saldo, x = codOrgao)) +
   scale_y_log10(labels = function(x) {format(x, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
   labs(y = "Valores em R$ (escala logarítmica)",
        x = NULL,
-       title = "Saldos diários dos órgãos do Ministério da Ciência e Tecnologia",
+       title = "Saldos financeiros diários - Ministério da Ciência e Tecnologia",
        subtitle = "Período de janeiro de 2017 a agosto de 2018") +
+  expand_limits(y = max(dados$Saldo) * 2) + 
   tema() + theme(legend.position = "none")
 
 graf_estatico
 ```
 
+O mesmo gráfico, porém com a inclusão de diagramas de caixas, indicando medianas, quartis, mínimos, máximos e outliers.
+
 ```{r}
+graf_estatico + geom_boxplot()
+```
+
+Por fim, uma animação que mostra a evolução dos valores diários no tempo, com a indicação dos valores mínimos (em <span style="color: firebrick;">vermelho</span>) e máximos <span style="color: navy;">azul</span>.
+
+```{r, fig.width=7, fig.height=7}
 graf_estatico +
- +
+  geom_tile(aes(y = ifelse(Date>data_min,minimo,NA)), fill = "firebrick", alpha = 0.4, width = 1, height = 0.03) +
+  geom_tile(aes(y = ifelse(Date>data_max,maximo,NA)), fill = "navy", alpha = 0.4, width = 1, height = 0.03) +  
+  geom_text(aes(y = ifelse(Date>data_min,minimo * 0.95,NA), 
+                label = paste(format(round(minimo/1000000,1), big.mark = ".", decimal.mark=",", scientific = FALSE), "mi")), 
+            hjust = 1,
+            size = 2.5, 
+            family = "Source Sans Pro",
+            fontface = "plain",
+            color = "firebrick"
+            ) +
+  geom_text(aes(y = ifelse(Date>data_max,maximo * 1.05,NA), 
+                label = paste(format(round(maximo/1000000,1), big.mark = ".", decimal.mark=",", scientific = FALSE), "mi")), 
+            hjust = 0,
+            size = 2.5, 
+            family = "Source Sans Pro",
+            fontface = "plain",
+            color = "navy"
+            ) +
   labs(subtitle = "Posição em {frame_time}") +
   tema() + theme(legend.position = "none") +
   transition_time(Date) +
   ease_aes('linear')
 ```
 
+## Visualização de todas as movimentações financeiras de um órgão
+
+Nesta seção, vamos tentar construir uma visualização que demonstre todos os pagamentos e recebimentos, além dos saldos financeiros, dia a dia, de um determinado órgão do MCTI.
+
+Vamos carregar os dados e fazer um sumário das movimentações provocadas por cada tipo de documento.
+
+```{r}
+
+dados_fluxo_Siafi <- read_excel('data/MCTI_limSqDiarioDoc.xlsx')
+
+colnames(dados_fluxo_Siafi) <- c(
+  "codOrgao", 
+  "nomeOrgao", 
+  "Data", 
+  "Documento", 
+  "docObservacao", 
+  "Item", 
+  "Movimento")
+
+# vamos usar um pipe parecido com o da análise geral, mas antes precisamos de outras informacoes.
+
+# aqui um resumo dos movimentos para podermos mapear os tipos de movimento possíveis.
+
+dados_fluxo_Siafi %>%
+  mutate(Movimento = as.numeric(as.character(Movimento)),
+         tipoDoc = ifelse(str_sub(Documento, 1, 13) == "SALDO INICIAL",
+                          "Saldo de abertura",
+                          str_sub(Documento, 16, 17)),
+         tipoMov = ifelse(Movimento < 0, "Negativo", "Positivo")) %>%
+  group_by(tipoDoc, tipoMov) %>%
+  summarise(Total = format(sum(Movimento),big.mark=".", decimal.mark=","),
+            Quantidade = n()) %>%
+  kable("html", format.args = list(big.mark=".", decimal.mark=",")) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover"))
 
 
+```
 
-```{r fig.height=20, fig.width=11, message=FALSE, warning=FALSE}
-dados_fin <- dados %>% 
-  filter(`Item Informação` == "LIMITES DE SAQUE (OFSS, DIVIDA, BACEN E PREV)" &
-           `Fonte Recursos Detalhada Código` %in% c("0100000000", "0300000000")) %>%
-  mutate(TipoDoc  = substr(Documento, 16, 17),
-         TipoMov  = ifelse(`Saldo R$ (Item Informação)` > 0, "Recebimentos", "Pagamentos"),
-         data_num = factor(ifelse(str_sub(`Dia Lançamento`, 1, 3) == "000", paste0(str_sub(`Dia Lançamento`, 5, 8), "0000"),
-                           paste0(str_sub(`Dia Lançamento`, 7, 10), 
-                                 str_sub(`Dia Lançamento`, 4, 5), 
-                                 str_sub(`Dia Lançamento`, 1, 2))))) %>%
-  group_by(data_num, TipoMov) %>%
-  summarise(valor = sum(`Saldo R$ (Item Informação)`)) %>%
-  spread(key = TipoMov, value = valor, fill = 0) %>%
-  arrange(data_num) %>%
-  ungroup() %>% # sem esse ungroup ele não calcula o cumsum corretamente, ele vai continuar calculando por data_num.
-  mutate(MovLiq = Recebimentos + Pagamentos,
-         saldo = cumsum(MovLiq),
-         saldo_anterior = lag(saldo))
+Assim, indetificamos sete possíveis movimentos:
 
-dados_fin_receb <- dados_fin %>%
-  mutate(ptoFinal_receb = ifelse(data_num == "20180000", saldo, saldo_anterior + Recebimentos)) %>%
-  select(data_num, saldo_anterior, ptoFinal_receb) %>%
-  gather(saldo_anterior, ptoFinal_receb, key = "Pontos", value = "Valor") %>%
-  arrange(data_num)
+* Receitas próprias - movimentos positivos por RAs;
+* Recebimentos de recursos do Tesouro - movimentos positivos por PFs;
+* Anulações de pagamentos - movimentos positivos por DF, DR, GF, GP, GR ou OB;
+* Ajustes contábeis - movimentos por NS;
+* Pagamentos - movimentos negativos por DF, DR, GF, GP, GR ou OB;
+* Ajustes na receita arrecadada (anulações, retificações etc.): movimentos negativos por RA; e
+* Liberações de recursos para outros órgãos - movimentos negativos por PFs.
 
-dados_ini_pagto <- dados_fin %>%
-  mutate(ptoInicial_pagto = ifelse(data_num == "20180000", saldo, saldo_anterior + Recebimentos)) %>%
-  select(data_num, saldo, ptoInicial_pagto) %>%
-  gather(ptoInicial_pagto, saldo, key = "Pontos", value = "Valor") %>%
-  arrange(data_num)
+Vamos tratar a nossa base para incorporar essas informações.
 
-saldo_minimo <- min(dados_fin$saldo)
-saldo_maximo <- max(dados_fin$saldo)
-saldo_mediana <- median(dados_fin$saldo)
-y_max <- length(dados_fin$data_num)
+```{r}
+# criando tabela de classificadores de movimentos financeiros
 
-plota_linha_ref <- function(valor_ref) {
-  geom_vline(xintercept = valor_ref, linetype = "dotted") }
+docsPgtos <- c("DF","DR","GF","GP","GR","OB")
 
-# essa função não está funcionando, ver depois.
-plota_texto_ref <- function(valor_ref, titulo) {
-  geom_text(aes(x = valor_ref * 1.05, 
-                y = 1,
-                label = paste(titulo, format(valor_ref, big.mark = ".", decimal.mark=",", scientific = FALSE))), 
-            size = 3, 
-            hjust = 0, 
-            family = "Source Sans Pro", 
-            color = "grey20")
-}
-# I get: Error in FUN(X[[i]], ...) : object 'valor_ref' not found
-# queria substituir as chamadas repetitivas ao geom_text por chamadas a essa função
-#
-# plota_texto_ref(saldo_minimo, "Mínimo:") +
-# plota_texto_ref(saldo_maximo, "Máximo:") +  
-# plota_texto_ref(saldo_medio, "Saldo médio:") + 
+tab_class_movimentos <- data.frame(
+  "classMovimento" = c("Recebimentos", 
+                       "Receitas", 
+                       "Anulações despesas",
+                       "Ajustes contábeis",
+                       "Ajustes contábeis",
+                       "Despesas",
+                       "Ajustes receitas",
+                       "Liberações de recursos"),
+  "tipoDoc"        = c("PF",
+                       "RA",
+                       "Docs pagamentos",
+                       "NS",
+                       "NS",
+                       "Docs pagamentos",
+                       "RA",
+                       "PF"),
+  "tipoMov"        = c("Positivo",
+                       "Positivo",
+                       "Positivo",
+                       "Positivo",
+                       "Negativo",
+                       "Negativo",
+                       "Negativo",
+                       "Negativo"))
 
-graf <- ggplot() +
-  geom_path(data = dados_fin_receb, aes(x = Valor, y = data_num), size = 1, color = "blue", position = position_nudge(y = 0.1)) +
-  geom_path(data = dados_ini_pagto, aes(x = Valor, y = data_num), size = 1, color = "red", position = position_nudge(y = -0.1)) +
-  geom_point(data = dados_fin, aes(x = saldo, y = data_num)) +
-  scale_y_discrete(limits = rev(dados_fin$data_num), 
-                   labels = function(x) {ifelse(str_sub(x, 5, 8) == "0000", 
-                                                "Saldo de abertura",
-                                                paste(str_sub(x, 7, 8), 
-                                                      str_sub(x, 5, 6), 
-                                                      str_sub(x, 1, 4), sep = "/"))}) +
-  scale_x_log10(labels = function(x) {format(x, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
-  plota_linha_ref(saldo_minimo) +
-  geom_text(aes(x = saldo_minimo * 1.05, 
-                y = y_max,
-                label = paste("Mínimo: R$", format(saldo_minimo, big.mark = ".", decimal.mark=",", scientific = FALSE))), 
-            size = 3, 
-            hjust = 0, 
-            family = "Source Sans Pro", 
-            color = "grey20") +
-  plota_linha_ref(saldo_maximo) +
-  geom_text(aes(x = saldo_maximo * 1.05, 
-                y = y_max,
-                label = paste("Máximo: R$", format(saldo_maximo, big.mark = ".", decimal.mark=",", scientific = FALSE))), 
-            size = 3, 
-            hjust = 0, 
-            family = "Source Sans Pro", 
-            color = "grey20") +
-  plota_linha_ref(saldo_mediana) +
-  geom_text(aes(x = saldo_mediana * 1.05, 
-                y = y_max,
-                label = paste("Mediana do saldo: R$", format(saldo_mediana, big.mark = ".", decimal.mark=",", scientific = FALSE))), 
-            size = 3, 
-            hjust = 0, 
-            family = "Source Sans Pro", 
-            color = "grey20") +
-  labs(y = NULL,
-       x = "Valores em R$ (escala logarítimica)",
-       title = "Saldo diário da UG SNH",
-       subtitle = "Linhas azuis indicam os recebimentos no dia; linhas vermelhas, os pagamentos; os pontos, o saldo final do dia ") +
-  tema()
-           
-graf         
+# tratando os dados
+
+dados_fluxo <- dados_fluxo_Siafi %>%
+  mutate(Movimento = as.numeric(as.character(Movimento)),
+         tipoDoc_ = ifelse(str_sub(Documento, 1, 13) == "SALDO INICIAL",
+                           "Saldo de abertura",
+                           str_sub(Documento, 16, 17)),
+         tipoDoc  = if_else(tipoDoc_ %in% docsPgtos, "Docs pagamentos", tipoDoc_),
+         tipoMov  = ifelse(Movimento < 0, "Negativo", "Positivo"),
+         Date     = if_else(str_sub(Data, 1, 4) != "000/", 
+                            dmy(Data), 
+                            ymd(paste0(str_sub(Data, 5, 8),"-01-01")))) %>%
+  complete(Date = seq(min(dados$Date), max(dados$Date), by = "days")) %>% 
+  replace(is.na(.), 0)
   
 
 ```
-
-## Análise para todas as UGs do Min Cidades
-
-```{r}
-dadosSiafi <- read.csv2('data/dadosSiafi.csv')
-colnames(dadosSiafi) <- c("Ano", "Mes", "Dia", "Data", "idItem", "nomeItem", "codItem", "idFonte", "codFonte", "nomeFonte", "idUG", "codUG", "nomeUG", "Movimento")
-
-tabOrgaosSiafi <- read.csv2('data/tabelaOrgao.csv')
-
-tabOrgaos <- tabOrgaosSiafi %>%
-  mutate(UG = as.character(ID_UG),
-         Orgao = paste(ID_ORGAO, NO_ORGAO, sep = " - ")) %>%
-  select(UG, Orgao)
-
-dados_tratados <- dadosSiafi %>% 
-  mutate(data_num = factor(ifelse(Mes == 0, paste0(Ano, "0000"),
-                           paste0(str_sub(Data, 7, 10), 
-                                  str_sub(Data, 4, 5), 
-                                  str_sub(Data, 1, 2))))) %>%
-  group_by(data_num, codUG) %>%
-  summarise(Movimento = sum(as.numeric(as.character(Movimento)))) %>%
-  arrange(data_num) %>%
-  spread(key = codUG, value = Movimento, fill = 0) %>%
-  ungroup() %>% # sem esse ungroup ele não calcula o cumsum corretamente, ele vai continuar calculando por data_num.
-  mutate_at(-1, funs(cumsum(.))) %>%
-  gather(-1, key = "UG", value = "Saldo") # (1)
-
-
-# (1) esse "-1" quer dizer que quero juntar todas as colunas, com exceção da primeira.
-
-
-dados_sumarizados <- dados_tratados %>%
-  mutate(Saldo = ifelse(Saldo < 1, NA, Saldo)) %>% # (1)
-  filter(!is.na(Saldo)) %>%                        # (1)
-  left_join(tabOrgaos) %>%  
-  group_by(UG) %>%
-  mutate(minimo   = min(Saldo, na.rm = TRUE),
-         data_min = data_num[which.min(Saldo)],
-         maximo   = max(Saldo, na.rm = TRUE),
-         data_max = data_num[which.max(Saldo)],
-         mediana  = median(Saldo, na.rm = TRUE),
-         media    = mean(Saldo)) %>%
-  ungroup() %>%
-  arrange(str_sub(Orgao, 1, 5), minimo) %>%
-  mutate(UG = factor(UG),
-         UG = fct_reorder(UG, as.numeric(str_sub(Orgao, 1, 5))),
-         data_num = as.numeric(as.character(data_num)))
-
-# (1) para remover saldos que começaram o período zerados
-
-# agora as UGs estão ordenadas por Orgão.
-
-lista_UGs <- dados_sumarizados %>%
-  arrange(Orgao, desc(UG)) %>%
-  group_by(Orgao) %>%
-  summarise(PrimeiraUG = first(UG))
-
-dados_sumarizados <- dados_sumarizados %>%
-  left_join(lista_UGs)
-
-
-# testando os valores com o Siafi, antes do gather:
-# format(sum(dados_tratados[dados_tratados$data_num == "20180331",-1]), big.mark = ".", decimal.mark=",", scientific = FALSE)
-# "2.733.100.242"
-# format(sum(dados_tratados[dados_tratados$data_num == "20171231",-1]), big.mark = ".", decimal.mark=",", scientific = FALSE)
-# "2.729.567.322"
-
-# remover os valores zerados das ugs 56000X
-
-
-
-grafico <- ggplot(dados_sumarizados, na.rm = TRUE, aes(y = ifelse(Saldo < 1, 1, Saldo), x = UG)) +
-  geom_ribbon(ymin = 0.001, ymax = 1000000, aes(fill = Orgao, group = Orgao), alpha = 0.2) +
-  geom_boxplot(outlier.shape = NA, alpha = 0.5, fill = "yellow") +
-  geom_jitter(shape = 21, fill = "grey70", stroke = 0, alpha = 0.9, 
-              position = position_jitter(width=0.1, height = 0)) +
-  coord_flip() +
-  geom_text(aes(label = ifelse(UG == PrimeiraUG, Orgao, ""), y = 1), size = 2,
-            family = "Source Sans Pro",
-            color = "grey50",
-            hjust = 0) + 
-  geom_hline(yintercept = min(dados_sumarizados$Saldo), linetype = "dotted") +
-  geom_hline(yintercept = median(dados_sumarizados$Saldo), linetype = "dotted") +
-  annotate(geom = "text", x = 24, y = min(dados_sumarizados$Saldo), 
-           label = paste("Mínimo geral: ", 
-                         format(round(min(dados_sumarizados$Saldo),0), 
-                                big.mark = ".", decimal.mark = ",")),
-           color = "grey50", size = 2, hjust = 0,
-           fontface = "italic", family = "Source Sans Pro") +
-  annotate(geom = "text", x = 24, y = median(dados_sumarizados$Saldo), 
-           label = paste("Mediana geral: ", 
-                         format(round(median(dados_sumarizados$Saldo),0), 
-                                big.mark = ".", decimal.mark = ",")),
-           color = "grey50", size = 2, hjust = 0,
-           fontface = "italic", family = "Source Sans Pro") +
-  scale_y_log10(labels = function(x) {format(x, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
-  expand_limits(x = c(0,25)) +
-  labs(y = "Valores em R$ (escala logarítmica)",
-       x = NULL) +
-  tema() + theme(legend.position = "none")
-
-    
-
-#gganimate... descobrir como funciona
-
-# ggplot(dados_sumarizados %>% filter(data_num < "20170428"), aes(y = ifelse(Saldo == 0, 1, Saldo), x = UG)) +
-#   geom_bar(stat = "sum", width=0.7, color = "white", size = 1, fill = "lightblue", alpha = 0.5) + 
-#   geom_point(color = "grey70", fill = "grey70", alpha = 0.5) + 
-#   coord_flip() +
-#   scale_y_log10(labels = function(x) {format(x, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
-#   labs(y = "Valores em R$ (escala logarítmica)",
-#        x = NULL) +
-#   tema() +
-#   transition_states(
-#     data_num,
-#     transition_length = 1,
-#     state_length = 1
-#   ) +
-#   shadow_mark(past = TRUE)
-
-grafico
-
-```
-
-Raster?
-
-```{r}
-graf2 <- ggplot(dados_sumarizados, na.rm = TRUE, aes(y = ifelse(Saldo < 1, 1, Saldo), x = UG)) +
-  geom_ribbon(ymin = 0.001, ymax = 1000000, aes(fill = Orgao, group = Orgao), alpha = 0.25) +
-  #geom_boxplot(outlier.shape = NA, alpha = 0.5, fill = "yellow") +
-  geom_tile(aes(y = round(Saldo,0)), fill = "firebrick", alpha = 0.1, width = 1, height = 0.01) +
-  coord_flip() +
-  geom_text(aes(label = ifelse(UG == PrimeiraUG, Orgao, ""), y = 1), size = 2,
-            family = "Source Sans Pro",
-            color = "grey50",
-            hjust = 0) + 
-  geom_hline(yintercept = min(dados_sumarizados$Saldo), linetype = "dotted") +
-  geom_hline(yintercept = median(dados_sumarizados$Saldo), linetype = "dotted") +
-  annotate(geom = "text", x = 24, y = min(dados_sumarizados$Saldo), 
-           label = paste("Mínimo geral: ", 
-                         format(round(min(dados_sumarizados$Saldo),0), 
-                                big.mark = ".", decimal.mark = ",")),
-           color = "grey50", size = 2, hjust = 0,
-           fontface = "italic", family = "Source Sans Pro") +
-  annotate(geom = "text", x = 24, y = median(dados_sumarizados$Saldo), 
-           label = paste("Mediana geral: ", 
-                         format(round(median(dados_sumarizados$Saldo),0), 
-                                big.mark = ".", decimal.mark = ",")),
-           color = "grey50", size = 2, hjust = 0,
-           fontface = "italic", family = "Source Sans Pro") +
-  scale_y_log10(labels = function(x) {format(x, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
-  expand_limits(x = c(0,25)) +
-  labs(y = "Valores em R$ (escala logarítmica)",
-       x = NULL,
-       title = "Saldos diários das UGs do Ministério da Cidades",
-       subtitle = "Período de janeiro de 2017 a julho de 2018") +
-  tema() + theme(legend.position = "none")
-
-graf2
-```
-
-xts. Fazer rotininha para preencher os NAs.
-
-```{r}
-library(xts)
-library(dygraphs)
-
-dados_ts <- dados_sumarizados %>% 
-  mutate(data_format = paste(ifelse(str_sub(data_num, 7, 8) == "00", 
-                                    "01", 
-                                    str_sub(data_num, 7, 8)),
-                             ifelse(str_sub(data_num, 5, 6) == "00", 
-                                    "01", 
-                                    str_sub(data_num, 5, 6)),
-                             str_sub(data_num, 1, 4), sep = "/")) %>% 
-  select(data_format, UG, Saldo) %>%
-  spread(key = "UG", value = Saldo)
-
-dados_xts1 <- xts(dados_ts %>% select(-`200012`, -`200320`, -`560003`, -`175004`, -`560005`, -`560019`, -`560020`, -data_format), order.by = as.Date(dados_ts$data_format, "%d/%m/%Y")) # (1)
-
-dados_xts2 <- xts(dados_ts %>% select(`200012`, `200320`), order.by = as.Date(dados_ts$data_format, "%d/%m/%Y")) # (2)
-
-dados_xts3 <- xts(dados_ts %>% select(`560003`, `175004`, `560005`, `560019`, `560020`), order.by = as.Date(dados_ts$data_format, "%d/%m/%Y"))
-
-# (1) Para criar o xts, passo como dados os dados de dados_ts, mas sem a coluna de data e essas duas UGs que são muito maiores.
-# (2) Para selecionar só essas duas UGs.
-head(dados_xts1)
-```
-
-```{r}
-
-  dygraph(dados_xts1) %>%
-    dyHighlight(highlightCircleSize = 5, 
-                highlightSeriesBackgroundAlpha = 0.2,
-                highlightSeriesOpts = list(strokeWidth = 3),
-                hideOnMouseOut = FALSE) %>%
-    dyAxis("y",
-           pixelsPerLabel = 40, 
-           gridLineColor = "rgb(222,222,222)",
-           axisLineColor = "white") %>% 
-    dyAxis("x", 
-           pixelsPerLabel = 40, 
-           gridLineColor = "rgb(222,222,222)", 
-           rangePad = 5,
-           axisLineColor = "white") %>% 
-    dyLegend(show = "always") %>%
-    dyCSS(textConnection(" 
-       .dygraph-legend > span { display: none; }
-       .dygraph-legend > span.highlight { display: inline; }
-       .dygraph-legend { font-family: Source Sans Pro; }
-       .dygraph-label { font-family: Source Sans Pro; }
-       .dygraph-axis-label { font-family: Source Sans Pro; }
-    ")) #2
-  
-  # 1: tem que passar uma função em JavaScript (por isso o JS(...)). Por algum motivo, ele estava posicionando no ano posterior, então incluí um -1 na expressão. Aí resolvi mudar a data para 01-01 de cada ano, em vez de 31-12.
-  # o que ajudou aqui: https://stackoverflow.com/questions/28915328/how-to-set-x-axis-in-dygraphs-for-r-to-show-just-month/28918684
-  
-  # 2: as duas primeiras linhas foi o que fizeram o tooltip mostrar apenas o valor da série "hoverada", e não as demais.
-  # o que ajudou aqui: https://stackoverflow.com/questions/35943583/plain-dygraphs-javascript-options-in-r-shiny
-
-```
-
-```{r}
-  dygraph(dados_xts2) %>%
-    dyHighlight(highlightCircleSize = 5, 
-                highlightSeriesBackgroundAlpha = 0.2,
-                highlightSeriesOpts = list(strokeWidth = 3),
-                hideOnMouseOut = FALSE) %>%
-    dyAxis("y",
-           pixelsPerLabel = 40, 
-           gridLineColor = "rgb(222,222,222)",
-           axisLineColor = "white") %>% 
-    dyAxis("x", 
-           pixelsPerLabel = 40, 
-           gridLineColor = "rgb(222,222,222)", 
-           rangePad = 5,
-           axisLineColor = "white") %>% 
-    dyLegend(show = "always") %>%
-    dyCSS(textConnection(" 
-       .dygraph-legend > span { display: none; }
-       .dygraph-legend > span.highlight { display: inline; }
-       .dygraph-legend { font-family: Source Sans Pro; }
-       .dygraph-label { font-family: Source Sans Pro; }
-       .dygraph-axis-label { font-family: Source Sans Pro; }
-    ")) #2
-```
-
-```{r}
-  dygraph(dados_xts3) %>%
-    dyHighlight(highlightCircleSize = 5, 
-                highlightSeriesBackgroundAlpha = 0.2,
-                highlightSeriesOpts = list(strokeWidth = 3),
-                hideOnMouseOut = FALSE) %>%
-    dyAxis("y",
-           pixelsPerLabel = 40, 
-           gridLineColor = "rgb(222,222,222)",
-           axisLineColor = "white") %>% 
-    dyAxis("x", 
-           pixelsPerLabel = 40, 
-           gridLineColor = "rgb(222,222,222)", 
-           rangePad = 5,
-           axisLineColor = "white") %>% 
-    dyLegend(show = "always") %>%
-    dyCSS(textConnection(" 
-       .dygraph-legend > span { display: none; }
-       .dygraph-legend > span.highlight { display: inline; }
-       .dygraph-legend { font-family: Source Sans Pro; }
-       .dygraph-label { font-family: Source Sans Pro; }
-       .dygraph-axis-label { font-family: Source Sans Pro; }
-    ")) #2
-
-```
-
-### Animação
-
-```{r}
-dados_ts_anim <- dados_ts <- dados_sumarizados %>% 
-  mutate(data_format = paste(ifelse(str_sub(data_num, 7, 8) == "00", 
-                                    "01", 
-                                    str_sub(data_num, 7, 8)),
-                             ifelse(str_sub(data_num, 5, 6) == "00", 
-                                    "01", 
-                                    str_sub(data_num, 5, 6)),
-                             str_sub(data_num, 1, 4), sep = "/"),
-         time = as.Date(data_format, "%d/%m/%Y")) %>% 
-  select(data_format, time, UG, Saldo)
-
-library(gganimate)
-
-ggplot(dados_ts_anim, aes(y = ifelse(Saldo < 1, 1, Saldo), x = UG)) +
-  geom_tile(aes(y = round(Saldo,0)), fill = "firebrick", alpha = 0.5, width = 1, height = 0.04) +
-  coord_flip() +
-  scale_y_log10(labels = function(x) {format(x, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
-  expand_limits(x = c(0,25)) +
-  labs(y = "Valores em R$ (escala logarítmica)",
-       x = NULL,
-       title = "Saldos diários das UGs do Ministério da Cidades",
-       subtitle = "Período de janeiro de 2017 a julho de 2018. Posição em { frame_time}") +
-  tema() + theme(legend.position = "none") +
-  transition_time(time) +
-  ease_aes('linear')
-
-```
-
-
-
-Sparklines
-
-```{r}
-library(sparkline)
-x = dados_ts$`560003`
-y = dados_ts$`175004`
-```
-
-| UG    | Sparkline         | Boxplot  
-|-------|-------------------|--------
-| 560003| `r sparkline(x)`  | `r sparkline(x, type ='box')`
-| 175004| `r sparkline(y)`  | `r sparkline(y, type ='box')`
 
 
 ## Comentários
@@ -588,13 +342,15 @@ y = dados_ts$`175004`
 
 * uma forma de agrupar as UGs pelo perfil "financeiro"? Algo como o gráfico barcode, mas com as UGs agrupadas por perfil, e não por órgão.
 
-* refazer para MCTI (24000), por órgão (são bem mas UGs).
+* [ok] refazer para MCTI (24000), por órgão (são bem mas UGs).
 
-* a variável tempo tem que ser uniforme, preencher os saldos para os dias em que não houve movimentação. arrumar uma forma de gerar uma série para todos os dias *úteis* do período de interesse.
+* [ok] a variável tempo tem que ser uniforme, preencher os saldos para os dias em que não houve movimentação. arrumar uma forma de gerar uma série para todos os dias do período de interesse.
 
-* usar gganimate para fazer alguma animação
+* [ok] usar gganimate para fazer alguma animação
 
 * usar geom_segment, no lugar de geom_path, no gráfico dos recebimentos e pagamentos? teria a vantagem de usar um único dataset, sem precisar fazer a ginástica que fiz.
+
+* melhorar formatação da tabela de sumário dos movimentos por tipo documento
 
 ### Descobertas, aprendizados, recursos interessantes
 
