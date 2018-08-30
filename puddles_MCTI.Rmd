@@ -81,7 +81,7 @@ dados <- dados_Siafi %>%
   select(Date, codOrgao, Movimento) %>% # (3)
   spread(key = codOrgao, value = Movimento, fill = 0) %>% # (4)
   arrange(Date) %>% # (5)
-  complete(Date = seq(min(dados$Date), max(dados$Date), by = "days")) %>% # (6)
+  complete(Date = seq(min(Date), max(Date), by = "days")) %>% # (6)
   replace(is.na(.), 0) %>% # (7)
   mutate_at(-1, funs(cumsum(.))) %>% # (8)
   gather(-1, key = "codOrgao", value = "Saldo") # (9)
@@ -294,12 +294,14 @@ docsPgtos <- c("DF","DR","GF","GP","GR","OB")
 tab_class_movimentos <- data.frame(
   "classMovimento" = c("Recebimentos", 
                        "Receitas", 
-                       "Anulações despesas",
-                       "Ajustes contábeis",
-                       "Ajustes contábeis",
+                       "AnulacoesDespesas",
+                       "AjustesContabeis",
+                       "AjustesContabeis",
                        "Despesas",
-                       "Ajustes receitas",
-                       "Liberações de recursos"),
+                       "AjustesReceitas",
+                       "Liberacoes",
+                       "SaldoAbertura",
+                       "SaldoAbertura"),
   "tipoDoc"        = c("PF",
                        "RA",
                        "Docs pagamentos",
@@ -307,7 +309,9 @@ tab_class_movimentos <- data.frame(
                        "NS",
                        "Docs pagamentos",
                        "RA",
-                       "PF"),
+                       "PF",
+                       "Saldo de abertura",
+                       "Saldo de abertura"),
   "tipoMov"        = c("Positivo",
                        "Positivo",
                        "Positivo",
@@ -315,6 +319,8 @@ tab_class_movimentos <- data.frame(
                        "Negativo",
                        "Negativo",
                        "Negativo",
+                       "Negativo",
+                       "Positivo",
                        "Negativo"))
 
 # tratando os dados
@@ -324,14 +330,75 @@ dados_fluxo <- dados_fluxo_Siafi %>%
          tipoDoc_ = ifelse(str_sub(Documento, 1, 13) == "SALDO INICIAL",
                            "Saldo de abertura",
                            str_sub(Documento, 16, 17)),
-         tipoDoc  = if_else(tipoDoc_ %in% docsPgtos, "Docs pagamentos", tipoDoc_),
+         tipoDoc  = if_else(tipoDoc_ %in% docsPgtos, 
+                            "Docs pagamentos", 
+                            tipoDoc_),
          tipoMov  = ifelse(Movimento < 0, "Negativo", "Positivo"),
-         Date     = if_else(str_sub(Data, 1, 4) != "000/", 
-                            dmy(Data), 
-                            ymd(paste0(str_sub(Data, 5, 8),"-01-01")))) %>%
-  complete(Date = seq(min(dados$Date), max(dados$Date), by = "days")) %>% 
-  replace(is.na(.), 0)
+         Date     = if_else(str_sub(Data, 1, 4) == "000/", 
+                            as.Date(paste0(str_sub(Data, 5, 8),"-01-01")),
+                            dmy(Data))) %>%
+  left_join(tab_class_movimentos) %>%
+  group_by(Date, classMovimento) %>% 
+  summarise(Movimento = sum(Movimento)) %>%
+  ungroup() %>%
+  select(Date, classMovimento, Movimento) %>%
+  spread(key = classMovimento, value = Movimento, fill = 0) %>%
+  complete(Date = seq(min(Date), max(Date), by = "days")) %>% # (1)
+  replace(is.na(.), 0) %>%
+  mutate(Movimento      = rowSums(.[-1]), # (2)
+         Saldo          = cumsum(Movimento),
+         Saldo_anterior = ifelse(row_number() == 1, Saldo, lag(Saldo)))
   
+# (1) como usar o "fill = list()" aqui? para não ter que usar esse replace depois?
+
+# (2) rowSums(.[-1]) faz a soma de todas as colunas, exceto a primeira.
+
+```
+
+Gráfico. Continuar daqui. Subdividir "Ajustes contábeis".
+
+```{r, fig.height=25, fig.width=11}
+
+ggplot(dados_fluxo %>% filter(Date <= "2017-07-31"), aes(y = Date, yend = Date)) +
+  geom_point(aes(x = Saldo)) +
+  geom_segment(aes(x    = Saldo_anterior,
+                   xend = Saldo_anterior + Recebimentos),
+               color = "navy", position = position_nudge(y = 0.1)) +
+  geom_segment(aes(x    = Saldo_anterior + Recebimentos,
+                   xend = Saldo_anterior + Recebimentos + Receitas),
+               color = "blue", position = position_nudge(y = 0.1)) +
+  geom_segment(aes(x    = Saldo_anterior + Recebimentos + Receitas,
+                   xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas),
+               color = "purple", position = position_nudge(y = 0.1)) + 
+  geom_segment(aes(x    = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas,
+                   xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeis),
+               color = "green", position = position_nudge(y = -0.1)) + # (1)
+  geom_segment(aes(x    = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeis,
+                   xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeis + Despesas),
+               color = "red", position = position_nudge(y = -0.1)) + 
+  geom_segment(aes(x    = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeis + Despesas,
+                   xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeis + Despesas + Liberacoes),
+               color = "firebrick", position = position_nudge(y = -0.1)) +
+  geom_segment(aes(x    = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeis + Despesas + Liberacoes,
+                   xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeis + Despesas + Liberacoes + AjustesReceitas),
+               color = "pink", position = position_nudge(y = -0.1)) +
+  scale_x_continuous(labels = function(x) {format(x/1000000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+  scale_y_discrete(labels = rev(levels(as.factor(dados_fluxo$Date)))) +
+  labs(x = "Valores em milhões de R$",
+       y = NULL,
+       title = "Movimentação diária - MCTI",
+       subtitle = "Período de janeiro de 2017 a julho de 2017") +
+  tema() + theme(legend.position = "none")
+
+# (1) acho q vou ter q subdividir ajustes contabeis em "positivo" e "negativos"
+```
+
+```{r}
+dados_fluxo_gather <- dados_fluxo %>% filter(Date < "2017-03-30") %>%
+  gather(-1, key = "tipoMov", value = "Valor")
+```
+
+```{r}
 
 ```
 
