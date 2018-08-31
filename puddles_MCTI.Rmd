@@ -3,6 +3,8 @@ title: "Projeto Peppa Pig"
 output:
   html_document: 
     df_print: paged
+    code_folding: hide
+
 ---
 
 ```{css, echo=FALSE}
@@ -47,12 +49,17 @@ tema <- function(){
       legend.position = 'bottom')
 }
 ```
+## Motivação: I see dead puddles
+
+Esta análise preliminar e experimental busca explorar, visualizar e compreender o motivo da existência dos chamados *empoçamentos*: a permanência de saldos financeiros não utilizados em algumas unidades, dificultando os processos de programação financeira e execução orçamentária.
+
+PAra isso, analisaremos de forma sintética todas as movimentações financeiras, consolidadas em nível diário, de um determinado órgão da administração federal: o Ministério da Ciência e Tecnologia.
 
 ## Dados Siafi
 
 Uma visão geral da estrutura dos dados do Siafi que serão utilizados.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 
 dados_Siafi <- read.csv2('data/dadosMCTI.csv')
 colnames(dados_Siafi) <- c("Ano", "Mes", "Dia", "Data", 
@@ -60,16 +67,14 @@ colnames(dados_Siafi) <- c("Ano", "Mes", "Dia", "Data",
                            "idOrgao", "codOrgao", "nomeOrgao", 
                            "Movimento")
 
-head(dados_Siafi, 5) %>% 
-  kable("html", format.args = list(big.mark=".", decimal.mark=",")) %>%
-  kable_styling(bootstrap_options = c("striped", "hover"))
+head(dados_Siafi, 5)
 ```
 
 ## Análise geral dos órgão do MCTI
 
 Vamos tratar os dados para obter uma matriz com os saldos diários para todo o período considerado, por órgão do MCTI.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 
 # vamos tratar os dados. comentarios nas notas de cada linha
 
@@ -114,7 +119,7 @@ dados <- dados_Siafi %>%
 ```
 Em seguida, vamos calcular alguns sumários estatísticos (mínimos, máximos, médias e medianas) por órgão, para todo o período, e vamos terminar de preparar os dados para visualizá-los.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 # criar uma tabelinha com os códigos e nomes dos órgãos para posteriormente levar essas informações à tabela processada
 
 nomes_orgaos <- data.frame(
@@ -152,7 +157,7 @@ dados <- dados %>%
 
 O gráfico abaixo demonstra as médias dos saldos diários da conta de limite de saque (que representa a parcela da Conta Única da União atribuida ao órgão) dos órgãos do MCTI no período considerado.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 ggplot(sumario_dados, aes(y = media, x = siglaOrgao)) +
   geom_bar(stat = "identity", fill = "goldenrod", color = "white") +
   geom_text(aes(y = media + 2000, label = paste(format(round(media/1000000,0), 
@@ -173,7 +178,7 @@ ggplot(sumario_dados, aes(y = media, x = siglaOrgao)) +
 
 O gráfico acima demonstra a média, mas para ter uma melhor ideia da distribuição desses valores no período, elaboramos o gráfico abaixo com todos os saldos diários de cada órgão do MCTI plotados. O valor do saldo financeiro para cada dia é representado por uma linha clara. Concentrações de saldos numa mesma faixa de valores produzem regiões mais escuras. O gráfico utiliza uma escala logarítmica, para permitir uma melhor visualização de todos os órgãos, em razão da discrepância dos saldos observados em cada órgão.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 graf_estatico <- ggplot(dados, aes(y = Saldo, x = siglaOrgao)) +
   geom_tile(aes(y = round(Saldo,0)), fill = "darkgoldenrod", alpha = 0.1, width = 1, height = 0.01) +
   coord_flip() +
@@ -204,13 +209,13 @@ graf_estatico
 
 O mesmo gráfico, porém com a inclusão de diagramas de caixas, indicando medianas, quartis, mínimos, máximos e outliers.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 graf_estatico + geom_boxplot()
 ```
 
 Por fim, uma animação que mostra a evolução dos valores diários no tempo, com a indicação dos valores mínimos (em <span style="color: firebrick;">vermelho</span>) e máximos <span style="color: navy;">azul</span>.
 
-```{r, fig.width=7, fig.height=7}
+```{r fig.height=9, fig.width=9, message=FALSE, warning=FALSE}
 graf_estatico +
   geom_tile(aes(y = ifelse(Date>data_min,minimo,NA)), fill = "firebrick", alpha = 0.4, width = 1, height = 0.03) +
   geom_tile(aes(y = ifelse(Date>data_max,maximo,NA)), fill = "navy", alpha = 0.4, width = 1, height = 0.03) +  
@@ -238,11 +243,11 @@ graf_estatico +
 
 ## Visualização de todas as movimentações financeiras de um órgão
 
-Nesta seção, vamos tentar construir uma visualização que demonstre todos os pagamentos e recebimentos, além dos saldos financeiros, dia a dia, de um determinado órgão do MCTI.
+Nesta seção, vamos tentar analisar com mais detalhe as movimentações de um único órgão, construindo uma visualização que demonstre todos os pagamentos e recebimentos, além dos saldos financeiros, dia a dia. 
 
-Vamos carregar os dados e fazer um sumário das movimentações provocadas por cada tipo de documento.
+Vamos carregar os dados e fazer um sumário das movimentações provocadas por cada tipo de documento, atribuindo um classificador que será utilizado na visualização.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 
 dados_fluxo_Siafi <- read_excel('data/MCTI_limSqDiarioDoc.xlsx')
 
@@ -274,7 +279,7 @@ dados_fluxo_Siafi %>%
 
 ```
 
-Assim, indetificamos sete possíveis movimentos:
+Assim, identificamos sete possíveis movimentos:
 
 * Receitas próprias - movimentos positivos por RAs;
 * Recebimentos de recursos do Tesouro - movimentos positivos por PFs;
@@ -286,7 +291,7 @@ Assim, indetificamos sete possíveis movimentos:
 
 Vamos tratar a nossa base para incorporar essas informações.
 
-```{r}
+```{r message=FALSE, warning=FALSE}
 # criando tabela de classificadores de movimentos financeiros
 
 docsPgtos <- c("DF","DR","GF","GP","GR","OB")
@@ -295,8 +300,8 @@ tab_class_movimentos <- data.frame(
   "classMovimento" = c("Recebimentos", 
                        "Receitas", 
                        "AnulacoesDespesas",
-                       "AjustesContabeis",
-                       "AjustesContabeis",
+                       "AjustesContabeisPos",
+                       "AjustesContabeisNeg",
                        "Despesas",
                        "AjustesReceitas",
                        "Liberacoes",
@@ -347,7 +352,10 @@ dados_fluxo <- dados_fluxo_Siafi %>%
   replace(is.na(.), 0) %>%
   mutate(Movimento      = rowSums(.[-1]), # (2)
          Saldo          = cumsum(Movimento),
-         Saldo_anterior = ifelse(row_number() == 1, Saldo, lag(Saldo)))
+         Saldo_anterior = ifelse(row_number() == 1, Saldo, lag(Saldo)),
+         data_num = factor(paste0(year(Date),
+                                  str_sub(Date, 6, 7), 
+                                  str_sub(Date, 9, 10))))
   
 # (1) como usar o "fill = list()" aqui? para não ter que usar esse replace depois?
 
@@ -355,53 +363,94 @@ dados_fluxo <- dados_fluxo_Siafi %>%
 
 ```
 
-Gráfico. Continuar daqui. Subdividir "Ajustes contábeis".
+O gráfico abaixo demonstra, de forma experimental, as movimentações diárias num período de 4 meses. Os pontos representam os saldos ao final do dia, e as linhas as movimentações:
 
-```{r, fig.height=25, fig.width=11}
+* linhas contínuas <span style="color: navy;">azuis</span> representam receitas;
+* linhas contínuas <span style="color: firebrick;">vermelhas</span> representam despesas;
+* linhas pontilhadas <span style="color: navy;">azuis</span> representam recursos financeiros recebidos do tesouro;
+* linhas pontilhadas <span style="color: firebrick;">vermelhas</span> representam recursos financeiros transferidos para outros órgãos;
+* as linhas <span style="color: grey70;">cinzas</> representam outras movimentações.
 
-ggplot(dados_fluxo %>% filter(Date <= "2017-07-31"), aes(y = Date, yend = Date)) +
+```{r fig.height=20, fig.width=11, message=FALSE, warning=FALSE}
+
+dados_plot <- dados_fluxo %>% filter(Date <= "2017-04-30")
+
+minimo <- min(dados_plot$Saldo)
+media <- mean(dados_plot$Saldo)
+
+ggplot(dados_plot, aes(y = data_num, yend = data_num)) +
   geom_point(aes(x = Saldo)) +
+  
   geom_segment(aes(x    = Saldo_anterior,
-                   xend = Saldo_anterior + Recebimentos),
-               color = "navy", position = position_nudge(y = 0.1)) +
+                   xend = Saldo_anterior + 
+                          Recebimentos),
+               color = "navy", 
+               position = position_nudge(y = 0.1)) +
+  
   geom_segment(aes(x    = Saldo_anterior + Recebimentos,
                    xend = Saldo_anterior + Recebimentos + Receitas),
-               color = "blue", position = position_nudge(y = 0.1)) +
+               color = "navy", 
+               linetype = "dotted", 
+               position = position_nudge(y = 0.1)) +
+  
   geom_segment(aes(x    = Saldo_anterior + Recebimentos + Receitas,
                    xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas),
-               color = "purple", position = position_nudge(y = 0.1)) + 
+               color = "grey70", 
+               position = position_nudge(y = 0.1)) + 
+  
   geom_segment(aes(x    = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas,
-                   xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeis),
-               color = "green", position = position_nudge(y = -0.1)) + # (1)
-  geom_segment(aes(x    = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeis,
-                   xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeis + Despesas),
-               color = "red", position = position_nudge(y = -0.1)) + 
-  geom_segment(aes(x    = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeis + Despesas,
-                   xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeis + Despesas + Liberacoes),
-               color = "firebrick", position = position_nudge(y = -0.1)) +
-  geom_segment(aes(x    = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeis + Despesas + Liberacoes,
-                   xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeis + Despesas + Liberacoes + AjustesReceitas),
-               color = "pink", position = position_nudge(y = -0.1)) +
+                   xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeisPos),
+               color = "grey70", 
+               position = position_nudge(y = 0.1)) + 
+
+  geom_segment(aes(x    = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeisPos,
+                   xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeisPos + AjustesContabeisNeg),
+               color = "grey70", 
+               position = position_nudge(y = -0.1)) + 
+    
+  geom_segment(aes(x    = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeisPos + AjustesContabeisNeg,
+                   xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeisPos + AjustesContabeisNeg + Despesas),
+               
+               color = "firebrick", 
+               position = position_nudge(y = -0.1)) + 
+  
+  geom_segment(aes(x    = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeisPos + AjustesContabeisNeg + Despesas,
+                   xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeisPos + AjustesContabeisNeg + Despesas + Liberacoes),
+               color = "firebrick", 
+               linetype = "dotted",
+               position = position_nudge(y = -0.1)) +
+  
+  geom_segment(aes(x    = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeisPos + AjustesContabeisNeg + Despesas + Liberacoes,
+                   xend = Saldo_anterior + Recebimentos + Receitas + AnulacoesDespesas + AjustesContabeisPos + AjustesContabeisNeg + Despesas + Liberacoes + AjustesReceitas),
+               color = "grey70", position = position_nudge(y = -0.1)) +
+  
+  geom_vline(xintercept = minimo, linetype = "dotted") +
+  geom_vline(xintercept = media, linetype = "dotted") +
+  annotate(geom = "text", y = length(dados_plot$data_num) + 1, x = minimo, 
+           label = paste("Mínimo para o período: R$", 
+                         format(round(minimo,0), 
+                                big.mark = ".", decimal.mark = ",")),
+           color = "grey50", size = 3, hjust = 0,
+           family = "Source Sans Pro") +
+  annotate(geom = "text", y = length(dados_plot$data_num) + 1, x = media, 
+           label = paste("Média para o período: R$", 
+                         format(round(media,0), 
+                                big.mark = ".", decimal.mark = ",")),
+           color = "grey50", size = 3, hjust = 0,
+           family = "Source Sans Pro") +
+  scale_y_discrete(limits = rev(dados_plot$data_num), 
+               labels = function(x) {paste(str_sub(x, 7, 8),
+                                           str_sub(x, 5, 6),
+                                           str_sub(x, 1, 4), sep = "/")}) +
   scale_x_continuous(labels = function(x) {format(x/1000000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
-  scale_y_discrete(labels = rev(levels(as.factor(dados_fluxo$Date)))) +
   labs(x = "Valores em milhões de R$",
        y = NULL,
-       title = "Movimentação diária - MCTI",
-       subtitle = "Período de janeiro de 2017 a julho de 2017") +
+       title = "Saldos (pontos) e Movimentações diárias (linhas) - MCTI",
+       subtitle = "Período de janeiro de 2017 a abril de 2017") +
+  expand_limits(y = length(dados_plot$data_num) + 2) +
   tema() + theme(legend.position = "none")
 
-# (1) acho q vou ter q subdividir ajustes contabeis em "positivo" e "negativos"
 ```
-
-```{r}
-dados_fluxo_gather <- dados_fluxo %>% filter(Date < "2017-03-30") %>%
-  gather(-1, key = "tipoMov", value = "Valor")
-```
-
-```{r}
-
-```
-
 
 ## Comentários
 
@@ -415,7 +464,9 @@ dados_fluxo_gather <- dados_fluxo %>% filter(Date < "2017-03-30") %>%
 
 * [ok] usar gganimate para fazer alguma animação
 
-* usar geom_segment, no lugar de geom_path, no gráfico dos recebimentos e pagamentos? teria a vantagem de usar um único dataset, sem precisar fazer a ginástica que fiz.
+* [ok] usar geom_segment, no lugar de geom_path, no gráfico dos recebimentos e pagamentos? teria a vantagem de usar um único dataset, sem precisar fazer a ginástica que fiz.
+
+* experimentar fazer um gather e ficar com colunas de classificação do movimento, x e xend. usando geom_segment com um aes de cor talvez fique melhor.
 
 * melhorar formatação da tabela de sumário dos movimentos por tipo documento
 
