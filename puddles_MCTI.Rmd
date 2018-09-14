@@ -30,6 +30,9 @@ library(kableExtra)
 library(lubridate)
 library(gganimate)
 library(scales)
+library(ggrepel)
+library(xts)
+library(dygraphs)
 loadfonts()
 
 tema <- function(){
@@ -153,7 +156,7 @@ dados <- dados %>%
 
 ```
 
-### Visualizações
+### Saldos diários dos caixas dos órgãos
 
 O gráfico abaixo demonstra as médias dos saldos diários da conta de limite de saque (que representa a parcela da Conta Única da União atribuida ao órgão) dos órgãos do MCTI no período considerado.
 
@@ -179,18 +182,28 @@ ggplot(sumario_dados, aes(y = media, x = siglaOrgao)) +
 O gráfico acima demonstra a média, mas para ter uma melhor ideia da distribuição desses valores no período, elaboramos o gráfico abaixo com todos os saldos diários de cada órgão do MCTI plotados. O valor do saldo financeiro para cada dia é representado por uma linha clara. Concentrações de saldos numa mesma faixa de valores produzem regiões mais escuras. O gráfico utiliza uma escala logarítmica, para permitir uma melhor visualização de todos os órgãos, em razão da discrepância dos saldos observados em cada órgão.
 
 ```{r message=FALSE, warning=FALSE}
+
+qde_orgaos <- length(unique(dados$Orgao))
+
 graf_estatico <- ggplot(dados, aes(y = Saldo, x = siglaOrgao)) +
   geom_tile(aes(y = round(Saldo,0)), fill = "darkgoldenrod", alpha = 0.1, width = 1, height = 0.01) +
   coord_flip() +
   geom_hline(yintercept = min(dados$Saldo), linetype = "dotted") +
+  geom_hline(yintercept = mean(dados$Saldo), linetype = "dotted") +
   geom_hline(yintercept = median(dados$Saldo), linetype = "dotted") +
-  annotate(geom = "text", x = length(unique(dados$Orgao)) + 1, y = min(dados$Saldo), 
+  annotate(geom = "text", x = qde_orgaos + 1, y = min(dados$Saldo), 
            label = paste("Mínimo geral: ", 
                          format(round(min(dados$Saldo),0), 
                                 big.mark = ".", decimal.mark = ",")),
            color = "grey50", size = 2, hjust = 0,
            family = "Source Sans Pro") +
-  annotate(geom = "text", x = length(unique(dados$Orgao)) + 1, y = median(dados$Saldo), 
+  annotate(geom = "text", x = qde_orgaos + 1, y = mean(dados$Saldo), 
+           label = paste("Média geral: ", 
+                         format(round(mean(dados$Saldo),0), 
+                                big.mark = ".", decimal.mark = ",")),
+           color = "grey50", size = 2, hjust = 0,
+           family = "Source Sans Pro") +
+  annotate(geom = "text", x = qde_orgaos + 1, y = median(dados$Saldo), 
            label = paste("Mediana geral: ", 
                          format(round(median(dados$Saldo),0), 
                                 big.mark = ".", decimal.mark = ",")),
@@ -201,7 +214,7 @@ graf_estatico <- ggplot(dados, aes(y = Saldo, x = siglaOrgao)) +
        x = NULL,
        title = "Saldos financeiros diários - Ministério da Ciência e Tecnologia",
        subtitle = "Período de janeiro de 2017 a agosto de 2018") +
-  expand_limits(y = max(dados$Saldo) * 2) + 
+  expand_limits(y = max(dados$Saldo) * 2, x = qde_orgaos + 1.2) + 
   tema() + theme(legend.position = "none")
 
 graf_estatico
@@ -215,14 +228,14 @@ graf_estatico + geom_boxplot()
 
 Por fim, uma animação que mostra a evolução dos valores diários no tempo, com a indicação dos valores mínimos (em <span style="color: firebrick;">vermelho</span>) e máximos <span style="color: navy;">azul</span>.
 
-```{r fig.height=9, fig.width=9, message=FALSE, warning=FALSE}
-graf_estatico +
+```{r message=FALSE, warning=FALSE}
+graf_gif <- graf_estatico +
   geom_tile(aes(y = ifelse(Date>data_min,minimo,NA)), fill = "firebrick", alpha = 0.4, width = 1, height = 0.03) +
   geom_tile(aes(y = ifelse(Date>data_max,maximo,NA)), fill = "navy", alpha = 0.4, width = 1, height = 0.03) +  
   geom_text(aes(y = ifelse(Date>data_min,minimo * 0.95,NA), 
                 label = paste(format(round(minimo/1000000,1), big.mark = ".", decimal.mark=",", scientific = FALSE), "mi")), 
             hjust = 1,
-            size = 2.5, 
+            size = 3, 
             family = "Source Sans Pro",
             fontface = "plain",
             color = "firebrick"
@@ -230,7 +243,7 @@ graf_estatico +
   geom_text(aes(y = ifelse(Date>data_max,maximo * 1.05,NA), 
                 label = paste(format(round(maximo/1000000,1), big.mark = ".", decimal.mark=",", scientific = FALSE), "mi")), 
             hjust = 0,
-            size = 2.5, 
+            size = 3, 
             family = "Source Sans Pro",
             fontface = "plain",
             color = "navy"
@@ -239,7 +252,381 @@ graf_estatico +
   tema() + theme(legend.position = "none") +
   transition_time(Date) +
   ease_aes('linear')
+
+animate(graf_gif, nframes = 200, height = 480, width = 672)
 ```
+
+## Análise do caixa em relação às obrigações a pagar
+
+Carga de dados a partir do Siafi.
+
+```{r message=FALSE, warning=FALSE}
+
+dados_CxLiq_Siafi <- read_excel("data/MCTI_lim_saque_liq_pagar.xlsx", skip = 5)
+
+colnames(dados_CxLiq_Siafi) <- c(
+  "codOrgao", 
+  "nomeOrgao", 
+  "Data", 
+  "Item", 
+  "Movimento")
+
+dados_CxLiq <- dados_CxLiq_Siafi %>%
+  filter(!(codOrgao %in% c("49280", "20502"))) %>% # (1)
+  mutate(Date     = if_else(str_sub(Data, 1, 4) == "000/", 
+                            as.Date(paste0(str_sub(Data, 5, 8),"-01-01")),
+                            dmy(Data))) %>%
+  group_by(Date, codOrgao, Item) %>% 
+  summarise(Movimento = sum(Movimento)) %>%
+  ungroup() %>%
+  unite(classificador, Item, codOrgao, sep = "__") %>% # (2)
+  select(Date, classificador, Movimento) %>%
+  spread(key = classificador, value = Movimento, fill = 0) %>%
+  complete(Date = seq(min(Date), max(Date), by = "days")) %>% # (3)
+  replace(is.na(.), 0) %>%
+  mutate_at(-1, funs(cumsum(.))) %>% # (4)
+  mutate(data_num = factor(paste0(year(Date), # (5)
+                                  str_sub(Date, 6, 7), 
+                                  str_sub(Date, 9, 10)))) %>%
+  gather(c(-"data_num", -"Date"), key = classificador, value = saldo) %>%
+  separate(classificador, c("item", "codOrgao"), sep = "__") %>%
+  left_join(nomes_orgaos) %>%
+  mutate(Orgao = paste(codOrgao, nomeOrgao, sep = " - ")) %>%
+  spread(key = item, value = saldo, fill = 0) %>%
+  rename(Caixa      = `LIMITES DE SAQUE (OFSS, DIVIDA, BACEN E PREV)`,
+         Obrigacoes = `VALORES LIQUIDADOS A PAGAR (EXERCICIO + RP)`)
+         
+# (1) filtrando valor indevido registrado nos correios.
+
+# (2) unindo os dois classificadores (item e orgao) para poder fazer um spread só, depois vou separá-los.
+
+# (3)
+
+# (4) agora uso o cumsum para calcular os totais acumulados em cada coluna (que neste ponto se referem a cada órgão.) usei o -1 na referência do mutate_at para calcular essa soma acumulada para TODAS as colunas, EXCETO a primeira (pq ela é a data).
+  
+# (5) preciso dessa data nesse formato para fazer a animação.
+```
+
+### Gif
+
+```{r}
+triangulo_superior <- data.frame("x" = c(1, 1e+10, 1),
+                                 "y" = c(1, 1e+10, 1e+10))
+
+triangulo_inferior <- data.frame("x" = c(1, 1e+10, 1e+10),
+                                 "y" = c(1, 1e+10, 1))
+```
+
+Gráfico estático para um dia. Melhorar...
+
+```{r}
+ggplot(dados_CxLiq %>% filter(Date == "2017-01-02"),
+       aes(y = Caixa, 
+           x = Obrigacoes)) + # color = Caixa > Obrigacoes
+  geom_polygon(data = triangulo_superior, 
+               aes(x = x, y = y),
+               fill = "dodgerblue",
+               alpha = 0.1) +
+  geom_polygon(data = triangulo_inferior, 
+               aes(x = x, y = y),
+               fill = "red",
+               alpha = 0.1) +
+  geom_label(aes(fill = siglaOrgao, label = siglaOrgao), color = "white", size = 3) +
+  geom_abline(intercept = 0, slope = 1, linetype="dotted") +
+  scale_x_log10(limits=c(5e+02,1e+10), 
+                labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+  scale_y_log10(limits=c(5e+02,1e+10),
+                labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+  scale_fill_manual(values = c("AEB" = "cyan", 
+                               "MCTI" = "dodgerblue", 
+                               "ANATEL" = "firebrick", 
+                               "NUCLEBRAS" = "darkcyan",
+                               "INB" = "darkturquoise",
+                               "FUST" = "coral",
+                               "FUNTTEL" = "coral",
+                               "FNDCT" = "coral",
+                               "CNDCT" = "gray",
+                               "CNEN" = "darkgray",
+                               "CNTEA" = "lightslategray")) +
+  labs(y = "Caixa (R$ mil)",
+       x = "Obrigações a pagar (R$ mil)",
+       title = "Caixa e obrigações (decorrentes da execução orçamentária) a pagar dos órgãos do MCTI",
+       subtitle = "Saldos diários em {frame_time}") +
+  tema() + theme(legend.position = "none")
+```
+
+
+O gráfico
+
+```{r message=FALSE, warning=FALSE}
+scat <- ggplot(dados_CxLiq,
+       aes(y = Caixa, 
+           x = Obrigacoes)) + # color = Caixa > Obrigacoes
+  geom_polygon(data = triangulo_superior, 
+               aes(x = x, y = y),
+               fill = "dodgerblue",
+               alpha = 0.1) +
+  geom_polygon(data = triangulo_inferior, 
+               aes(x = x, y = y),
+               fill = "red",
+               alpha = 0.1) +
+  geom_label(aes(fill = siglaOrgao, label = siglaOrgao), color = "white", size = 3) +
+  geom_abline(intercept = 0, slope = 1, linetype="dotted") +
+  scale_x_log10(limits=c(5e+02,1e+10), 
+                labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+  scale_y_log10(limits=c(5e+02,1e+10),
+                labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+  scale_fill_manual(values = c("AEB" = "cyan", 
+                               "MCTI" = "dodgerblue", 
+                               "ANATEL" = "firebrick", 
+                               "NUCLEBRAS" = "darkcyan",
+                               "INB" = "darkturquoise",
+                               "FUST" = "coral",
+                               "FUNTTEL" = "coral",
+                               "FNDCT" = "coral",
+                               "CNDCT" = "gray",
+                               "CNEN" = "darkgray",
+                               "CNTEA" = "lightslategray")) +
+  labs(y = "Caixa (R$ mil)",
+       x = "Obrigações a pagar (R$ mil)",
+       title = "Caixa e obrigações (decorrentes da execução orçamentária) a pagar dos órgãos do MCTI",
+       subtitle = "Saldos diários em {frame_time}") +
+  tema() + theme(legend.position = "none") +
+  transition_time(Date) +
+  ease_aes('linear')
+
+animate(scat, nframes = 500, height = 600, width = 600)
+
+anim_save("scat.gif", animation = last_animation())
+
+```
+
+Um gráfico de dispersão conectado, exemplo para um órgão.
+
+```{r}
+
+plot_connected_scatterplot <- function(dados){
+  ggplot(dados,
+         aes(y = Caixa, 
+             x = Obrigacoes)) + # color = Caixa > Obrigacoes
+    geom_polygon(data = triangulo_superior, 
+                 aes(x = x, y = y),
+                 fill = "dodgerblue",
+                 alpha = 0.1) +
+    geom_polygon(data = triangulo_inferior, 
+                 aes(x = x, y = y),
+                 fill = "red",
+                 alpha = 0.1) +
+    geom_path(color = "gray") +
+    geom_point(aes(color = Caixa > Obrigacoes), alpha = 0.7) +
+    geom_abline(intercept = 0, slope = 1, linetype="dotted") +
+    scale_x_log10(limits=c(1e+03,1e+10),
+                  labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+    scale_y_log10(limits=c(1e+03,1e+10),
+                  labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+    scale_color_manual(values = c("TRUE" = "dodgerblue", "FALSE" = "red"),
+                       guide = FALSE) +
+    labs(y = "Caixa (R$ mil)",
+         x = "Obrigações a pagar (R$ mil)",
+         title = "Caixa x Obrigações (decorrentes da execução orçamentária) a pagar") +
+    tema()
+}
+
+plot_connected_scatterplot(dados_CxLiq %>% filter(codOrgao == "24000")) + labs(subtitle = "Órgão 24000 - MCTI (Administração Direta)")
+```
+
+E para todos os órgãos?
+
+```{r message=FALSE, warning=FALSE, fig.height = 8, fig.width = 7}
+plot_connected_scatterplot(dados_CxLiq) + facet_wrap(~ siglaOrgao, ncol = 3)
+```
+
+gráficos de linha. Para o MCTI como um todo. (shiny com a opção de selecionar o órgão?)
+
+```{r}
+
+dados_xts_MCTI <- dados_CxLiq %>% 
+  group_by(Date) %>%
+  summarise(Caixa      = sum(Caixa),
+            Obrigacoes = sum(Obrigacoes)) %>%
+  ungroup()
+
+sh_xts <- xts(dados_xts_MCTI[,-1], order.by = dados_xts_MCTI$Date)
+
+dygraph(sh_xts) %>%
+    dyHighlight(highlightCircleSize = 5, 
+                highlightSeriesBackgroundAlpha = 0.2,
+                highlightSeriesOpts = list(strokeWidth = 3),
+                hideOnMouseOut = FALSE) %>%
+    dyAxis("y",
+           pixelsPerLabel = 40, 
+           gridLineColor = "rgb(222,222,222)", 
+           axisLineColor = "white") %>% 
+    dyAxis("x", 
+           pixelsPerLabel = 40, 
+           gridLineColor = "rgb(222,222,222)", 
+           rangePad = 5,
+           axisLineColor = "white") %>% 
+    dyLegend(show = "always") %>%
+    dyRangeSelector()
+
+
+
+```
+
+só a direta
+
+```{r}
+dados_xts_MCTI_direta <- dados_CxLiq %>% 
+  filter(codOrgao == "24000") %>%
+  select(Date, Caixa, Obrigacoes)
+
+sh_xts_direta <- xts(dados_xts_MCTI_direta[,-1], order.by = dados_xts_MCTI$Date)
+sh_xts_direta$saldo <- sh_xts_direta$Caixa - sh_xts_direta$Obrigacoes
+
+dygraph(sh_xts_direta[,3]) %>%
+    dyHighlight(highlightCircleSize = 5, 
+                highlightSeriesBackgroundAlpha = 0.2,
+                highlightSeriesOpts = list(strokeWidth = 3),
+                hideOnMouseOut = FALSE) %>%
+    dyAxis("y",
+           pixelsPerLabel = 40, 
+           gridLineColor = "rgb(222,222,222)", 
+           axisLineColor = "white") %>% 
+    dyAxis("x", 
+           pixelsPerLabel = 40, 
+           gridLineColor = "rgb(222,222,222)", 
+           rangePad = 5,
+           axisLineColor = "white") %>% 
+    dyLegend(show = "always") %>%
+    dyRangeSelector()
+```
+
+caixa - obrigações
+
+```{r}
+library(ggTimeSeries)
+
+dados_xts_MCTI_direta_heatmap <- dados_xts_MCTI_direta %>%
+  mutate(Saldo = Caixa - Obrigacoes)
+
+ggplot_calendar_heatmap(
+  dados_xts_MCTI_direta_heatmap,
+  'Date',
+  'Saldo'
+)   +
+  xlab(NULL) + 
+  ylab(NULL) + 
+  scale_fill_gradient2(labels = function(x) {format(x/1000000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+  tema() +
+  labs(
+    fill = "Saldo (em R$ milhões)"
+  ) +
+  facet_wrap(~Year, ncol = 1)
+
+#  scale_fill_continuous(low = 'red', high = 'blue') + 
+```
+
+
+Um sumário
+
+```{r message=FALSE, warning=FALSE}
+
+sumario_CxLiq <- dados_CxLiq %>%
+  mutate(dia_positivo = Caixa > Obrigacoes,
+         dia_negativo = Caixa <=Obrigacoes) %>%
+  group_by(siglaOrgao) %>%
+  summarise(
+    media_caixa   = mean(Caixa),
+    media_obrig   = mean(Obrigacoes),
+    dias_positivo = sum(dia_positivo),
+    dias_negativo = sum(dia_negativo)
+  ) %>%
+  ungroup() %>%
+  mutate(x0_positivo = 0,
+         x1_positivo = dias_positivo,
+         x0_negativo = dias_positivo,
+         x1_negativo = dias_positivo + dias_negativo)
+
+sumario_CxLiq_positivo <- sumario_CxLiq %>%
+  select(siglaOrgao, media_caixa, x0_positivo, x1_positivo) %>%
+  rename(x0 = x0_positivo,
+         x1 = x1_positivo) %>%
+  gather(3:4, key = posicao, value = x_positivo)
+
+sumario_CxLiq_negativo <- sumario_CxLiq %>%
+  select(siglaOrgao, media_obrig, x0_negativo, x1_negativo) %>%
+  rename(x0 = x0_negativo,
+         x1 = x1_negativo) %>%
+  gather(3:4, key = posicao, value = x_negativo)
+
+sumario_CxLiq_plot <- sumario_CxLiq_positivo %>%
+  left_join(sumario_CxLiq_negativo)
+
+
+
+```
+
+```{r}
+sumario_CxLiq_barplot <- sumario_CxLiq %>%
+  select(siglaOrgao, dias_positivo, dias_negativo) %>%
+  mutate(siglaOrgao = factor(siglaOrgao),
+         siglaOrgao = fct_reorder(siglaOrgao, dias_positivo, desc = FALSE)) %>%
+  gather(dias_positivo, dias_negativo, key = "tipoDia", value = "quantidade")
+
+ggplot(sumario_CxLiq_barplot,
+  aes(y = quantidade, x = siglaOrgao, fill = tipoDia)) +
+  geom_bar( stat="identity", position="fill", width=0.6, color = "white", size = 1) +
+  coord_flip() + 
+  scale_fill_manual(values = c("dias_positivo" = "dodgerblue", "dias_negativo" = "red"), labels = c("dias_positivo" = "Dias com sobra de caixa", "dias_negativo" = "Dias com falta de caixa")) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "Caixa x obrigações a pagar",
+    subtitle = "Quantidade de dias com sobra ou insuficiência de caixa",
+    x = NULL,
+    y = NULL,
+    fill = NULL) +
+  tema()
+```
+
+Uma visualização diferente... para um órgão.
+
+```{r}
+ggplot(sumario_CxLiq_plot %>% filter(siglaOrgao == "AEB"),
+       aes(group = siglaOrgao)) +
+  geom_ribbon(aes(x = x_positivo, ymin = 0, ymax = media_caixa), fill = "dodgerblue") +
+  geom_ribbon(aes(x = x_negativo, ymin = -media_obrig, ymax = 0), fill = "red") +
+  scale_y_continuous(labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+    labs(y = "Valores (R$ mil)",
+         x = "Quantidade de dias",
+         title = "Caixa x Obrigações a pagar",
+         subtitle = "Média e quantidade de dias com saldo positivo e negativo") +
+  geom_text(aes(x = ifelse(posicao == "x1", x_positivo/2, NA), 
+                y = -media_obrig/2, 
+                label = paste("Dias positivos: ", x_positivo)),
+            color = "dodgerblue", size = 3, 
+            hjust = 0,
+            position = "identity",
+            family = "Source Sans Pro") +
+  tema()
+
+# limits=c(-min(sumario_CxLiq_plot$media_obrig),                             max(sumario_CxLiq_plot$media_caixa))
+  
+```
+
+```{r, fig.height=8, fig.width= 6}
+ggplot(sumario_CxLiq_plot %>% filter(siglaOrgao != "ANATEL"),
+       aes(group = siglaOrgao)) +
+  geom_ribbon(aes(x = x_positivo, ymin = 0, ymax = media_caixa), fill = "dodgerblue") +
+  geom_ribbon(aes(x = x_negativo, ymin = -media_obrig, ymax = 0), fill = "red") +
+  scale_y_continuous(labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+    labs(y = "Valores (R$ mil)",
+         x = "Quantidade de dias",
+         title = "Caixa x Obrigações a pagar",
+         subtitle = "Média e quantidade de dias com saldo positivo e negativo") +
+  tema() + facet_wrap(~ siglaOrgao, ncol = 1)
+```
+
 
 ## Visualização de todas as movimentações financeiras de um órgão
 
@@ -271,9 +658,10 @@ dados_fluxo_Siafi %>%
                           str_sub(Documento, 16, 17)),
          tipoMov = ifelse(Movimento < 0, "Negativo", "Positivo")) %>%
   group_by(tipoDoc, tipoMov) %>%
-  summarise(Total = format(sum(Movimento),big.mark=".", decimal.mark=","),
+  summarise(Total = format(round(sum(Movimento),0),big.mark=".", decimal.mark=","),
             Quantidade = n()) %>%
-  kable("html", format.args = list(big.mark=".", decimal.mark=",")) %>% 
+  kable("html", format.args = list(big.mark=".", decimal.mark=","), 
+        align = c("l","l","r","r"), digits = c(NA, NA, 0, 0)) %>% 
   kable_styling(bootstrap_options = c("striped", "hover"))
 
 
@@ -478,4 +866,6 @@ ggplot(dados_plot, aes(y = data_num, yend = data_num)) +
 * ou seja, o `ifelse` muda o tipo do dado... o `if_else` do `dplyr`, não.
 * para completar um período de dias: https://blog.exploratory.io/populating-missing-dates-with-complete-and-fill-functions-in-r-and-exploratory-79f2a321e6b5
 * `complete`, do tidyr
-* animações: https://www.idg.tv/video/89987/r-tip-animations-in-r
+* animações: 
+- https://www.idg.tv/video/89987/r-tip-animations-in-r
+- https://www.jumpingrivers.com/blog/r-gganimate-premier-league/
