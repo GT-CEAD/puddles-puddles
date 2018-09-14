@@ -317,7 +317,7 @@ triangulo_inferior <- data.frame("x" = c(1, 1e+10, 1e+10),
                                  "y" = c(1, 1e+10, 1))
 ```
 
-Gráfico estático para um dia. Melhorar...
+Gráfico estático para um dia. Melhorar...limites estão fixos :/
 
 ```{r}
 ggplot(dados_CxLiq %>% filter(Date == "2017-01-02"),
@@ -333,9 +333,9 @@ ggplot(dados_CxLiq %>% filter(Date == "2017-01-02"),
                alpha = 0.1) +
   geom_label(aes(fill = siglaOrgao, label = siglaOrgao), color = "white", size = 3) +
   geom_abline(intercept = 0, slope = 1, linetype="dotted") +
-  scale_x_log10(limits=c(5e+02,1e+10), 
+  scale_x_log10(limits=c(1e+05,5e+10), 
                 labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
-  scale_y_log10(limits=c(5e+02,1e+10),
+  scale_y_log10(limits=c(1e+05,5e+10),
                 labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
   scale_fill_manual(values = c("AEB" = "cyan", 
                                "MCTI" = "dodgerblue", 
@@ -359,6 +359,12 @@ ggplot(dados_CxLiq %>% filter(Date == "2017-01-02"),
 O gráfico
 
 ```{r message=FALSE, warning=FALSE}
+
+min(dados_CxLiq$Caixa, dados_CxLiq$Obrigacoes)
+
+# min(subset(dados_CxLiq, dados_CxLiq$siglaOrgao == "ANATEL")$Caixa)
+
+
 scat <- ggplot(dados_CxLiq,
        aes(y = Caixa, 
            x = Obrigacoes)) + # color = Caixa > Obrigacoes
@@ -397,9 +403,11 @@ scat <- ggplot(dados_CxLiq,
 
 animate(scat, nframes = 500, height = 600, width = 600)
 
-anim_save("scat.gif", animation = last_animation())
+anim_save("scat2.gif", animation = last_animation())
 
 ```
+
+### Connected Scatterplot
 
 Um gráfico de dispersão conectado, exemplo para um órgão.
 
@@ -440,6 +448,8 @@ E para todos os órgãos?
 ```{r message=FALSE, warning=FALSE, fig.height = 8, fig.width = 7}
 plot_connected_scatterplot(dados_CxLiq) + facet_wrap(~ siglaOrgao, ncol = 3)
 ```
+
+### Dygraphs - linha
 
 gráficos de linha. Para o MCTI como um todo. (shiny com a opção de selecionar o órgão?)
 
@@ -502,6 +512,8 @@ dygraph(sh_xts_direta[,3]) %>%
     dyRangeSelector()
 ```
 
+### Calendar heatmap
+
 caixa - obrigações
 
 ```{r}
@@ -513,7 +525,9 @@ dados_xts_MCTI_direta_heatmap <- dados_xts_MCTI_direta %>%
 ggplot_calendar_heatmap(
   dados_xts_MCTI_direta_heatmap,
   'Date',
-  'Saldo'
+  'Saldo',
+  monthBorderSize = 0.75,
+  dayBorderColour = "lightgrey"
 )   +
   xlab(NULL) + 
   ylab(NULL) + 
@@ -843,6 +857,10 @@ ggplot(dados_plot, aes(y = data_num, yend = data_num)) +
 ## Comentários
 
 ### Questões a considerar
+
+* ANATEL tem meses com saldos negativos. O Item está errado :/
+
+* uma forma de mostrar o saldo líquido de caixa - obrigações, mas mostrando se, nos dias negativos, haveria saldo positivo em outros órgãos. o problema é: que órgãos considerar? pq a anatel tem um baita saldo positivo no período inteiro.
 
 * uma forma de agrupar as UGs pelo perfil "financeiro"? Algo como o gráfico barcode, mas com as UGs agrupadas por perfil, e não por órgão.
 
