@@ -1,0 +1,115 @@
+---
+title: "teste_shiny"
+author: "tiago"
+date: "19 de setembro de 2018"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(readxl)
+library(extrafont)
+library(kableExtra)
+library(lubridate)
+library(gganimate)
+library(scales)
+library(ggrepel)
+library(xts)
+library(dygraphs)
+loadfonts()
+```
+
+
+```{r}
+dados_CxLiq_Siafi <- read_excel("data/MCTI_lim_saque_liq_pagar.xlsx", skip = 5)
+
+colnames(dados_CxLiq_Siafi) <- c(
+  "codOrgao", 
+  "nomeOrgao", 
+  "Data", 
+  "Item", 
+  "Movimento")
+
+dados_CxLiq <- dados_CxLiq_Siafi %>%
+  filter(!(codOrgao %in% c("49280", "20502"))) %>% # (1)
+  mutate(Date     = if_else(str_sub(Data, 1, 4) == "000/", 
+                            as.Date(paste0(str_sub(Data, 5, 8),"-01-01")),
+                            dmy(Data))) %>%
+  group_by(Date, codOrgao, Item) %>% 
+  summarise(Movimento = sum(Movimento)) %>%
+  ungroup() %>%
+  unite(classificador, Item, codOrgao, sep = "__") %>% # (2)
+  select(Date, classificador, Movimento) %>%
+  spread(key = classificador, value = Movimento, fill = 0) %>%
+  complete(Date = seq(min(Date), max(Date), by = "days")) %>% # (3)
+  replace(is.na(.), 0) %>%
+  mutate_at(-1, funs(cumsum(.))) %>% # (4)
+  mutate(data_num = factor(paste0(year(Date), # (5)
+                                  str_sub(Date, 6, 7), 
+                                  str_sub(Date, 9, 10)))) %>%
+  gather(c(-"data_num", -"Date"), key = classificador, value = coluna) %>%
+  separate(classificador, c("item", "codOrgao"), sep = "__") %>%
+  spread(key = item, value = coluna, fill = 0) %>%
+  rename(Caixa      = `LIMITES DE SAQUE (OFSS, DIVIDA, BACEN E PREV)`,
+         Obrigacoes = `VALORES LIQUIDADOS A PAGAR (EXERCICIO + RP)`) %>%
+  mutate(Saldo      = Caixa - Obrigacoes)
+```
+
+Gera lista de xts's
+
+```{r}
+
+lista_orgaos <- unique(dados_CxLiq$codOrgao)
+
+gera_xts <- function(orgao) {
+  dados_xts <- dados_CxLiq %>% 
+        filter(codOrgao == orgao) %>%
+        select(Date, Caixa, Obrigacoes, Saldo)
+  sh_xts <- xts(dados_xts[,-1], order.by = dados_xts$Date)
+}
+
+lista_xts <- lapply(lista_orgaos, gera_xts)
+names(lista_xts) <- lista_orgaos
+
+```
+
+
+
+This R Markdown document is made interactive using Shiny. Unlike the more traditional workflow of creating static reports, you can now create documents that allow your readers to change the assumptions underlying your analysis and see the results immediately. 
+
+To learn more, see [Interactive Documents](http://rmarkdown.rstudio.com/authoring_shiny.html).
+
+## Inputs and Outputs
+
+You can embed Shiny inputs and outputs in your document. Outputs are automatically updated whenever inputs change.  This demonstrates how a standard R plot can be made interactive by wrapping it in the Shiny `renderPlot` function. The `selectInput` and `sliderInput` functions create the input widgets used to drive the plot.
+
+```{r eruptions, echo=FALSE}
+inputPanel(
+  selectInput("orgao", label = "Órgão desejado:",
+              choices = unique(dados_CxLiq$codOrgao), selected = unique(dados_CxLiq$codOrgao)[1])
+)
+
+renderDygraph({
+  
+  dygraph(lista_xts[[input$orgao]]) %>%
+      dyHighlight(highlightCircleSize = 5,
+                  highlightSeriesBackgroundAlpha = 0.2,
+                  highlightSeriesOpts = list(strokeWidth = 3),
+                  hideOnMouseOut = FALSE) %>%
+      dyAxis("y",
+             pixelsPerLabel = 40,
+             gridLineColor = "rgb(222,222,222)",
+             axisLineColor = "white") %>%
+      dyAxis("x",
+             pixelsPerLabel = 40,
+             gridLineColor = "rgb(222,222,222)",
+             rangePad = 5,
+             axisLineColor = "white") %>%
+      dyLegend(show = "always") %>%
+      dyRangeSelector()
+})
+```
+
