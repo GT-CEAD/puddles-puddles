@@ -176,54 +176,45 @@ dados <- dados %>%
 
 O gráfico abaixo demonstra as médias dos saldos diários da conta de limite de saque (que representa a parcela da Conta Única da União atribuida ao órgão) dos órgãos do MCTI no período considerado.
 
-```{r message=FALSE, warning=FALSE}
+```{r message=FALSE, warning=FALSE, fig.height=6}
 
 cores_barras <- c("media_obrig" = "firebrick", "media" = "dodgerblue")
 
-ggplot(sumario_barplot, aes(y = valor, x = siglaOrgao, fill = variavel)) +
-  geom_bar(stat = "identity", color = "white", position = "dodge") +
-  geom_text(aes(y = valor + 2000, label = paste(format(round(valor/1000000,0), 
-                                big.mark = ".", decimal.mark = ","), "mi"),
-                color = variavel),
-            size = 2.5, 
-            hjust = 0,
-            position = position_dodge(1), # (0)
-            family = "Source Sans Pro") +
-  coord_flip() +
-  scale_color_manual(values = cores_barras) +
-  scale_fill_manual(values = cores_barras,
-                    labels = c("media_obrig" = "Obrigações", "media" = "Caixa")) +
-  scale_y_continuous(labels = function(x) {format(x/1000000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
-  labs(y = "Valores em milhões de R$",
-       x = NULL,
-       fill = NULL,
-       title = "Média dos saldos financeiros diários - órgãos do MCTI",
-       subtitle = "Período de janeiro de 2017 a agosto de 2018") +
-  expand_limits(y = max(sumario_dados$valor) * 1.05) +
-  tema() + guides(color = FALSE) # (1)
+graf_barras <- function(dados_plot, complemento_titulo) {
+  ggplot(dados_plot, aes(y = valor, x = siglaOrgao, fill = variavel)) +
+    geom_bar(stat = "identity", color = "white", position = "dodge") +
+    geom_text(aes(y = valor + 2000, label = paste(format(round(valor/1000000,0), 
+                                  big.mark = ".", decimal.mark = ","), "mi"),
+                  color = variavel),
+              size = 3, 
+              hjust = 0,
+              position = position_dodge(1), # (0)
+              family = "Source Sans Pro") +
+    coord_flip() +
+    scale_color_manual(values = cores_barras) +
+    scale_fill_manual(values = cores_barras,
+                      labels = c("media_obrig" = "Obrigações", "media" = "Caixa")) +
+    scale_y_continuous(labels = function(x) {format(x/1000000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+    labs(y = "Valores em milhões de R$",
+         x = NULL,
+         fill = NULL,
+         title = paste0("Média dos saldos financeiros diários - caixa x obrigações - ", complemento_titulo),
+         subtitle = "Período de janeiro de 2017 a agosto de 2018") +
+    expand_limits(y = max(sumario_dados$valor) * 1.05) +
+    tema() + guides(color = FALSE) # (1)
+  
+  # (0) precisa passar um "width" para a position_dodge para posicionar o label corretamente.
+  # (1) para não mostrar a legenda apenas para o color (que foi usado no geom_text)
+}
 
-# (0) precisa passar um "width" para a position_dodge para posicionar o label corretamente.
-# (1) para não mostrar a legenda apenas para o color (que foi usado no geom_text)
+graf_barras(sumario_barplot, "órgãos do MCTI")
 ```
 
-```{r message=FALSE, warning=FALSE}
-ggplot(sumario_dados, aes(y = media, x = siglaOrgao)) +
-  geom_bar(stat = "identity", fill = "goldenrod", color = "white") +
-  geom_text(aes(y = media + 2000, label = paste(format(round(media/1000000,0), 
-                                big.mark = ".", decimal.mark = ","), "mi")),
-            color = "grey50", size = 2.5, 
-            hjust = 0,
-            position = "identity",
-            family = "Source Sans Pro") +
-  coord_flip() +
-  scale_y_continuous(labels = function(x) {format(x/1000000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
-  labs(y = "Valores em milhões de R$",
-       x = NULL,
-       title = "Média dos saldos financeiros diários - Ministério da Ciência e Tecnologia",
-       subtitle = "Período de janeiro de 2017 a agosto de 2018") +
-  expand_limits(y = max(sumario_dados$media * 1.1)) +
-  tema() + theme(legend.position = "none")
+```{r message=FALSE, warning=FALSE, fig.height = 6}
+graf_barras(sumario_barplot %>% filter(codOrgao != "41231"), "órgãos do MCTI (exceto ANATEL")
 ```
+
+<pegar os dados das despesas inscristas em RPP!>
 
 O gráfico acima demonstra a média, mas para ter uma melhor ideia da distribuição desses valores no período, elaboramos o gráfico abaixo com todos os saldos diários de cada órgão do MCTI plotados. O valor do saldo financeiro para cada dia é representado por uma linha clara. Concentrações de saldos numa mesma faixa de valores produzem regiões mais escuras. O gráfico utiliza uma escala logarítmica, para permitir uma melhor visualização de todos os órgãos, em razão da discrepância dos saldos observados em cada órgão.
 

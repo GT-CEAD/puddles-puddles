@@ -1,3 +1,11 @@
+dados_Siafi <- read.csv2('data/dadosMCTI.csv')
+colnames(dados_Siafi) <- c("Ano", "Mes", "Dia", "Data", 
+                           "idItem", "nomeItem", "codItem", 
+                           "idOrgao", "codOrgao", "nomeOrgao", 
+                           "Movimento")
+
+head(dados_Siafi, 5)
+
 # vamos tratar os dados. comentarios nas notas de cada linha
 
 dados <- dados_Siafi %>%
@@ -37,3 +45,22 @@ dados <- dados_Siafi %>%
 # (8) agora uso o cumsum para calcular os totais acumulados em cada coluna (que neste ponto se referem a cada órgão.) usei o -1 na referência do mutate_at para calcular essa soma acumulada para TODAS as colunas, EXCETO a primeira (pq ela é a data).
 
 # (9) agora, de maneira semelhante, uso o -1 para dizer que quero empilhar todas as colunas, exceto a primeira, que é a coluna de data.
+
+# bar plot antigo
+
+ggplot(sumario_dados, aes(y = media, x = siglaOrgao)) +
+  geom_bar(stat = "identity", fill = "goldenrod", color = "white") +
+  geom_text(aes(y = media + 2000, label = paste(format(round(media/1000000,0), 
+                                                       big.mark = ".", decimal.mark = ","), "mi")),
+            color = "grey50", size = 2.5, 
+            hjust = 0,
+            position = "identity",
+            family = "Source Sans Pro") +
+  coord_flip() +
+  scale_y_continuous(labels = function(x) {format(x/1000000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+  labs(y = "Valores em milhões de R$",
+       x = NULL,
+       title = "Média dos saldos financeiros diários - Ministério da Ciência e Tecnologia",
+       subtitle = "Período de janeiro de 2017 a agosto de 2018") +
+  expand_limits(y = max(sumario_dados$media * 1.1)) +
+  tema() + theme(legend.position = "none")
