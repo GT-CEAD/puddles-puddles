@@ -54,93 +54,102 @@ tema <- function(){
 ```
 ## Motivação: I see dead puddles
 
-Esta análise preliminar e experimental busca explorar, visualizar e compreender o motivo da existência dos chamados *empoçamentos*: a permanência de saldos financeiros não utilizados em algumas unidades, dificultando os processos de programação financeira e execução orçamentária.
+Esta análise preliminar e experimental busca explorar e visualizar os chamados *empoçamentos*: a permanência de saldos financeiros não utilizados em algumas unidades, dificultando os processos de programação financeira e execução orçamentária no âmbito do Governo Federal. Esperamos assim compreender o motivo da existência desses empoçamentos.
 
-PAra isso, analisaremos de forma sintética todas as movimentações financeiras, consolidadas em nível diário, de um determinado órgão da administração federal: o Ministério da Ciência e Tecnologia.
+Para isso, faremos uma análise contemplando todas as movimentações financeiras dos órgãos do Ministério da Ciência e Tecnologia da Informação. Inicialmente analisaremos essas movimentações consolidadas por dia. No final deste documento, analisaremos as movimentações por tipo (pagamentos, transferências, recebimentos etc.) e por dia, mas para apenas um dos órgãos, o órgão 24000, que representa a administração direta do Ministério.
 
-## Dados Siafi
+## Análise geral dos órgão do MCTI
+
+### Os dados
+
+Os dados que foram extraídos do Siafi representam as variações diárias no caixa e no total de obrigações a pagar de cada órgão. As obrigações a pagar consideradas são aquelas assumidas em decorrência da execução orçamentária.
 
 Uma visão geral da estrutura dos dados do Siafi que serão utilizados.
 
 ```{r message=FALSE, warning=FALSE}
 
-dados_Siafi <- read.csv2('data/dadosMCTI.csv')
-colnames(dados_Siafi) <- c("Ano", "Mes", "Dia", "Data", 
-                           "idItem", "nomeItem", "codItem", 
-                           "idOrgao", "codOrgao", "nomeOrgao", 
-                           "Movimento")
+dados_Siafi <- read_excel("data/MCTI_lim_saque_liq_pagar.xlsx", skip = 5)
+
+colnames(dados_Siafi) <- c(
+  "codOrgao", 
+  "nomeOrgao", 
+  "Data", 
+  "Item", 
+  "Movimento")
+
+# criar uma tabelinha com os códigos e nomes dos órgãos para posteriormente levar essas informações à tabela processada
+
+nomes_orgaos <- read.csv2("orgaosMCTI.csv")
+nomes_orgaos$codOrgao <- as.character(nomes_orgaos$codOrgao)
+
+# mostrar a tabela do Siafi
 
 head(dados_Siafi, 5)
 ```
 
-## Análise geral dos órgão do MCTI
-
-Vamos tratar os dados para obter uma matriz com os saldos diários para todo o período considerado, por órgão do MCTI.
+Vamos tratar os dados para obter uma matriz com os saldos diários do caixa, das obrigações a pagar e do saldo líquido (a diferença entre o caixa e as obrigações a pagar) para todo o período considerado, por órgão do MCTI.
 
 ```{r message=FALSE, warning=FALSE}
 
-# vamos tratar os dados. comentarios nas notas de cada linha
-
 dados <- dados_Siafi %>%
-  mutate(Date = if_else(Mes == 0, ymd(paste0(Ano,"-01-01")), dmy(Data))) %>% # (0)
-  group_by(Date, codOrgao) %>%
-  summarise(Movimento = sum(as.numeric(as.character(Movimento)))) %>% # (1)
-  ungroup() %>% # (2)
-  select(Date, codOrgao, Movimento) %>% # (3)
-  spread(key = codOrgao, value = Movimento, fill = 0) %>% # (4)
-  arrange(Date) %>% # (5)
-  complete(Date = seq(min(Date), max(Date), by = "days")) %>% # (6)
-  replace(is.na(.), 0) %>% # (7)
-  mutate_at(-1, funs(cumsum(.))) %>% # (8)
-  gather(-1, key = "codOrgao", value = "Saldo") # (9)
+  filter(!(codOrgao %in% c("49280", "20502"))) %>% # (1)
+  mutate(Date     = if_else(str_sub(Data, 1, 4) == "000/", 
+                            as.Date(paste0(str_sub(Data, 5, 8),"-01-01")),
+                            dmy(Data))) %>%
+  group_by(Date, codOrgao, Item) %>% 
+  summarise(Movimento = sum(Movimento)) %>% # (1a)
+  ungroup() %>% # (1b)
+  unite(classificador, Item, codOrgao, sep = "__") %>% # (2)
+  select(Date, classificador, Movimento) %>%
+  spread(key = classificador, value = Movimento, fill = 0) %>% # (2b)
+  complete(Date = seq(min(Date), max(Date), by = "days")) %>% # (3)
+  replace(is.na(.), 0) %>% # (3a)
+  mutate_at(-1, funs(cumsum(.))) %>% # (4)
+  mutate(data_num = factor(paste0(year(Date), # (5)
+                                  str_sub(Date, 6, 7), 
+                                  str_sub(Date, 9, 10)))) %>%
+  gather(c(-"data_num", -"Date"), key = classificador, value = saldo) %>% # (6)
+  separate(classificador, c("item", "codOrgao"), sep = "__") %>%
+  spread(key = item, value = saldo, fill = 0) %>%
+  rename(Caixa      = `LIMITES DE SAQUE (OFSS, DIVIDA, BACEN E PREV)`,
+         Obrigacoes = `VALORES LIQUIDADOS A PAGAR (EXERCICIO + RP)`) %>%
+  mutate(Saldo      = Caixa - Obrigacoes)
+         
+# (1) filtrando valor indevido registrado nos correios e em outro órgão (que são não OFSS).
 
-# (0) criar primeiro a coluna no formato de data, tratando os meses de abertura. importante: tem que usar o dplyr::if_else senão o ifelse muda o tipo do dado! :/
+# (1a) esse group_by com summarise é para somar eventuais registros repetidos. Ou seja, preciso ficar com um movimento para cada dia, para cada orgao. como atribuí que o saldo de abertura seria um movimento no dia 01/01, e tinha um caso em que havia de fato movimento no dia 01/01 em um orgao, apareciam dois registros no dia 01/01 nesse orgao. o summarise elimina esse problema.
 
-# poderia ter usado também:
+# (1b) por um motivo que ainda não entendo, sem esse ungroup ele não calcula o cumsum corretamente.
 
-# mutate(Date = if_else(Mes == 0, as.Date(paste0(Ano,"-01-01")), 
-#                       as.Date(paste(Ano, Mes, Dia, sep = "-"))))
+# (2) unindo os dois classificadores (item e orgao) para poder fazer um spread só, depois vou separá-los.
 
-# (1) esse group_by com summarise é para somar eventuais registros repetidos. Ou seja, preciso ficar com um movimento para cada dia, para cada orgao. como atribuí que o saldo de abertura seria um movimento no dia 01/01, e tinha um caso em que havia de fato movimento no dia 01/01 em um orgao, apareciam dois registros no dia 01/01 nesse orgao. o summarise elimina esse problema.
+# (2b) com o spread, um orgao que eventualmente não possuía movimento em determinado dia vai aparecer com "NA". Preenchi com 0 pq depois vou usar o cumsum para calcular os saldos.
 
-# (2) por um motivo que ainda não entendo, sem esse ungroup ele não calcula o cumsum corretamente.
+# (3) o complete vai completar as datas faltantes considerando a sequencia de dias entre o menor e o maior dia presente nos dados. Os valores para esses dias faltantes serão completados com "NA", então...
 
-# (3) estou pegando apenas o essencial para que minha planilha fique com apenas uma linha por data, quando eu fizer o spread. depois trago os nomes dos órgãos de novo via join, se for necessário.
+# (3a) uso o replace para substituir esses NAs por 0.
 
-# (4) com o spread, um orgao que eventualmente não possuía movimento em determinado dia vai aparecer com "NA". Preenchi com 0 pq depois vou usar o cumsum para calcular os saldos.
-
-# (5) classificando por data para o cumsum ter o significado que quero: saldos acumulados diários.
-
-# (6) o complete vai completar as datas faltantes considerando a sequencia de dias entre o menor e o maior dia presente nos dados. Os valores para esses dias faltantes serão completados com "NA", então...
+# (4) agora uso o cumsum para calcular os totais acumulados em cada coluna (que neste ponto se referem a cada órgão.) usei o -1 na referência do mutate_at para calcular essa soma acumulada para TODAS as colunas, EXCETO a primeira (pq ela é a data).
   
-# (7) o replace substitui esses NAs por 0.
+# (5) preciso dessa data nesse formato para fazer a animação.
 
-# (8) agora uso o cumsum para calcular os totais acumulados em cada coluna (que neste ponto se referem a cada órgão.) usei o -1 na referência do mutate_at para calcular essa soma acumulada para TODAS as colunas, EXCETO a primeira (pq ela é a data).
-
-# (9) agora, de maneira semelhante, uso o -1 para dizer que quero empilhar todas as colunas, exceto a primeira, que é a coluna de data.
-
+# (6) agora, de maneira semelhante, uso o "-" para dizer que quero empilhar todas as colunas, exceto as colunas de data numeria e de data.
 ```
+
 Em seguida, vamos calcular alguns sumários estatísticos (mínimos, máximos, médias e medianas) por órgão, para todo o período, e vamos terminar de preparar os dados para visualizá-los.
 
 ```{r message=FALSE, warning=FALSE}
-# criar uma tabelinha com os códigos e nomes dos órgãos para posteriormente levar essas informações à tabela processada
-
-nomes_orgaos <- data.frame(
-  "codOrgao" = factor(unique(dados_Siafi$codOrgao)),
-  "nomeOrgao" = factor(unique(dados_Siafi$nomeOrgao)),
-  "siglaOrgao" = c("FNDCT", "NUCLEBRAS", "INB", "CNDCT", "AEB", 
-                   "CNEN", "MCTI", "ANATEL", "CNTEA", "FUST", "FUNTTEL"))
-
 # elaborar sumários para gráficos (e para ordenar os órgãos por média descrescente)
 
 sumario_dados <- dados %>%
   group_by(codOrgao) %>%
-  summarise(minimo   = min(Saldo, na.rm = TRUE),
-            data_min = Date[which.min(Saldo)],
-            maximo   = max(Saldo, na.rm = TRUE),
-            data_max = Date[which.max(Saldo)],
-            mediana  = median(Saldo, na.rm = TRUE),
-            media    = mean(Saldo)) %>%
+  summarise(minimo      = min(Caixa, na.rm = TRUE),
+            data_min    = Date[which.min(Caixa)],
+            maximo      = max(Caixa, na.rm = TRUE),
+            data_max    = Date[which.max(Caixa)],
+            mediana     = median(Caixa, na.rm = TRUE),
+            media       = mean(Caixa),
+            media_obrig = mean(Obrigacoes)) %>%
   ungroup() %>%
   arrange(desc(media)) %>%
   left_join(nomes_orgaos) %>% 
@@ -148,6 +157,13 @@ sumario_dados <- dados %>%
          nomeOrgao  = fct_reorder(nomeOrgao, media, desc = TRUE),
          siglaOrgao = fct_reorder(siglaOrgao, media, desc = TRUE),
          Orgao      = paste(codOrgao, nomeOrgao, sep = " - "))
+
+sumario_barplot <- sumario_dados %>%
+  select(codOrgao, nomeOrgao, siglaOrgao, Orgao, media, media_obrig) %>%
+  gather(c(media, media_obrig), key = variavel, value = valor) %>%
+  mutate(variavel = factor(variavel, levels = c("media_obrig", "media"))) # (1)
+
+# (1) só para mudar a ordem das barras no plot logo abaixo.
   
 dados <- dados %>%
   left_join(sumario_dados)
@@ -159,6 +175,36 @@ dados <- dados %>%
 ### Saldos diários dos caixas dos órgãos
 
 O gráfico abaixo demonstra as médias dos saldos diários da conta de limite de saque (que representa a parcela da Conta Única da União atribuida ao órgão) dos órgãos do MCTI no período considerado.
+
+```{r message=FALSE, warning=FALSE}
+
+cores_barras <- c("media_obrig" = "firebrick", "media" = "dodgerblue")
+
+ggplot(sumario_barplot, aes(y = valor, x = siglaOrgao, fill = variavel)) +
+  geom_bar(stat = "identity", color = "white", position = "dodge") +
+  geom_text(aes(y = valor + 2000, label = paste(format(round(valor/1000000,0), 
+                                big.mark = ".", decimal.mark = ","), "mi"),
+                color = variavel),
+            size = 2.5, 
+            hjust = 0,
+            position = position_dodge(1), # (0)
+            family = "Source Sans Pro") +
+  coord_flip() +
+  scale_color_manual(values = cores_barras) +
+  scale_fill_manual(values = cores_barras,
+                    labels = c("media_obrig" = "Obrigações", "media" = "Caixa")) +
+  scale_y_continuous(labels = function(x) {format(x/1000000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+  labs(y = "Valores em milhões de R$",
+       x = NULL,
+       fill = NULL,
+       title = "Média dos saldos financeiros diários - órgãos do MCTI",
+       subtitle = "Período de janeiro de 2017 a agosto de 2018") +
+  expand_limits(y = max(sumario_dados$valor) * 1.05) +
+  tema() + guides(color = FALSE) # (1)
+
+# (0) precisa passar um "width" para a position_dodge para posicionar o label corretamente.
+# (1) para não mostrar a legenda apenas para o color (que foi usado no geom_text)
+```
 
 ```{r message=FALSE, warning=FALSE}
 ggplot(sumario_dados, aes(y = media, x = siglaOrgao)) +
@@ -260,53 +306,6 @@ animate(graf_gif, nframes = 200, height = 480, width = 672)
 
 Carga de dados a partir do Siafi.
 
-```{r message=FALSE, warning=FALSE}
-
-dados_CxLiq_Siafi <- read_excel("data/MCTI_lim_saque_liq_pagar.xlsx", skip = 5)
-
-colnames(dados_CxLiq_Siafi) <- c(
-  "codOrgao", 
-  "nomeOrgao", 
-  "Data", 
-  "Item", 
-  "Movimento")
-
-dados_CxLiq <- dados_CxLiq_Siafi %>%
-  filter(!(codOrgao %in% c("49280", "20502"))) %>% # (1)
-  mutate(Date     = if_else(str_sub(Data, 1, 4) == "000/", 
-                            as.Date(paste0(str_sub(Data, 5, 8),"-01-01")),
-                            dmy(Data))) %>%
-  group_by(Date, codOrgao, Item) %>% 
-  summarise(Movimento = sum(Movimento)) %>%
-  ungroup() %>%
-  unite(classificador, Item, codOrgao, sep = "__") %>% # (2)
-  select(Date, classificador, Movimento) %>%
-  spread(key = classificador, value = Movimento, fill = 0) %>%
-  complete(Date = seq(min(Date), max(Date), by = "days")) %>% # (3)
-  replace(is.na(.), 0) %>%
-  mutate_at(-1, funs(cumsum(.))) %>% # (4)
-  mutate(data_num = factor(paste0(year(Date), # (5)
-                                  str_sub(Date, 6, 7), 
-                                  str_sub(Date, 9, 10)))) %>%
-  gather(c(-"data_num", -"Date"), key = classificador, value = saldo) %>%
-  separate(classificador, c("item", "codOrgao"), sep = "__") %>%
-  left_join(nomes_orgaos) %>%
-  mutate(Orgao = paste(codOrgao, nomeOrgao, sep = " - ")) %>%
-  spread(key = item, value = saldo, fill = 0) %>%
-  rename(Caixa      = `LIMITES DE SAQUE (OFSS, DIVIDA, BACEN E PREV)`,
-         Obrigacoes = `VALORES LIQUIDADOS A PAGAR (EXERCICIO + RP)`)
-         
-# (1) filtrando valor indevido registrado nos correios.
-
-# (2) unindo os dois classificadores (item e orgao) para poder fazer um spread só, depois vou separá-los.
-
-# (3)
-
-# (4) agora uso o cumsum para calcular os totais acumulados em cada coluna (que neste ponto se referem a cada órgão.) usei o -1 na referência do mutate_at para calcular essa soma acumulada para TODAS as colunas, EXCETO a primeira (pq ela é a data).
-  
-# (5) preciso dessa data nesse formato para fazer a animação.
-```
-
 ### Gif
 
 ```{r}
@@ -320,7 +319,7 @@ triangulo_inferior <- data.frame("x" = c(1, 1e+10, 1e+10),
 Gráfico estático para um dia. Melhorar...limites estão fixos :/
 
 ```{r}
-ggplot(dados_CxLiq %>% filter(Date == "2017-01-02"),
+ggplot(dados %>% filter(Date == "2017-01-02"),
        aes(y = Caixa, 
            x = Obrigacoes)) + # color = Caixa > Obrigacoes
   geom_polygon(data = triangulo_superior, 
@@ -360,12 +359,12 @@ O gráfico
 
 ```{r message=FALSE, warning=FALSE}
 
-min(dados_CxLiq$Caixa, dados_CxLiq$Obrigacoes)
+min(dados$Caixa, dados$Obrigacoes)
 
-# min(subset(dados_CxLiq, dados_CxLiq$siglaOrgao == "ANATEL")$Caixa)
+# min(subset(dados, dados$siglaOrgao == "ANATEL")$Caixa)
 
 
-scat <- ggplot(dados_CxLiq,
+scat <- ggplot(dados,
        aes(y = Caixa, 
            x = Obrigacoes)) + # color = Caixa > Obrigacoes
   geom_polygon(data = triangulo_superior, 
@@ -440,13 +439,13 @@ plot_connected_scatterplot <- function(dados){
     tema()
 }
 
-plot_connected_scatterplot(dados_CxLiq %>% filter(codOrgao == "24000")) + labs(subtitle = "Órgão 24000 - MCTI (Administração Direta)")
+plot_connected_scatterplot(dados %>% filter(codOrgao == "24000")) + labs(subtitle = "Órgão 24000 - MCTI (Administração Direta)")
 ```
 
 E para todos os órgãos?
 
 ```{r message=FALSE, warning=FALSE, fig.height = 8, fig.width = 7}
-plot_connected_scatterplot(dados_CxLiq) + facet_wrap(~ siglaOrgao, ncol = 3)
+plot_connected_scatterplot(dados) + facet_wrap(~ siglaOrgao, ncol = 3)
 ```
 
 ### Dygraphs - linha
@@ -455,7 +454,7 @@ gráficos de linha. Para o MCTI como um todo. (shiny com a opção de selecionar
 
 ```{r}
 
-dados_xts_MCTI <- dados_CxLiq %>% 
+dados_xts_MCTI <- dados %>% 
   group_by(Date) %>%
   summarise(Caixa      = sum(Caixa),
             Obrigacoes = sum(Obrigacoes)) %>%
@@ -487,7 +486,7 @@ dygraph(sh_xts) %>%
 só a direta
 
 ```{r}
-dados_xts_MCTI_direta <- dados_CxLiq %>% 
+dados_xts_MCTI_direta <- dados %>% 
   filter(codOrgao == "24000") %>%
   select(Date, Caixa, Obrigacoes)
 
@@ -546,7 +545,7 @@ Um sumário
 
 ```{r message=FALSE, warning=FALSE}
 
-sumario_CxLiq <- dados_CxLiq %>%
+sumario_CxLiq <- dados %>%
   mutate(dia_positivo = Caixa > Obrigacoes,
          dia_negativo = Caixa <=Obrigacoes) %>%
   group_by(siglaOrgao) %>%
