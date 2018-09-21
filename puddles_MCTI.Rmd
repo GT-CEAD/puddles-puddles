@@ -1,10 +1,9 @@
 ---
 title: "Projeto Peppa Pig"
-output:
-  html_document: 
-    df_print: paged
+output: 
+  html_document:
     code_folding: hide
-
+    
 ---
 
 ```{css, echo=FALSE}
@@ -18,6 +17,19 @@ body {
 
 .dygraph-label {
   font-family: "Source Sans Pro";
+}
+
+h1, h2,h3,h4 {
+  color: #004a93;
+}
+
+h1, h2 {
+  font-weight: bold;
+}
+
+blockquote {
+  font-size: 12px;
+  background-color: #edeff9; 
 }
 
 ```
@@ -54,6 +66,8 @@ tema <- function(){
 ```
 ## Motivação: I see dead puddles
 
+![Peppa](peppa.gif)
+
 Esta análise preliminar e experimental busca explorar e visualizar os chamados *empoçamentos*: a permanência de saldos financeiros não utilizados em algumas unidades, dificultando os processos de programação financeira e execução orçamentária no âmbito do Governo Federal. Esperamos assim compreender o motivo da existência desses empoçamentos.
 
 Para isso, faremos uma análise contemplando todas as movimentações financeiras dos órgãos do Ministério da Ciência e Tecnologia da Informação. Inicialmente analisaremos essas movimentações consolidadas por dia. No final deste documento, analisaremos as movimentações por tipo (pagamentos, transferências, recebimentos etc.) e por dia, mas para apenas um dos órgãos, o órgão 24000, que representa a administração direta do Ministério.
@@ -64,7 +78,25 @@ Para isso, faremos uma análise contemplando todas as movimentações financeira
 
 Os dados que foram extraídos do Siafi representam as variações diárias no caixa e no total de obrigações a pagar de cada órgão. As obrigações a pagar consideradas são aquelas assumidas em decorrência da execução orçamentária.
 
-Uma visão geral da estrutura dos dados do Siafi que serão utilizados.
+As contas contábeis que representam essas informações são as seguintes:
+
+**Caixa**
+11112.20.01 = LIMITE DE SAQUE COM VINCULACAO DE PGTO - OFSS
+
+**Obrigações a Pagar**
+62292.01.03 = EMPENHOS LIQUIDADOS A PAGAR
+62292.01.07 = EMPENHOS LIQUIDADOS A PAGAR INSCRITO EM RPP
+63130.00.00 = RP NAO PROCESSADOS LIQUIDADOS A PAGAR
+63210.00.00 = RP PROCESSADOS A PAGAR
+
+
+Essas contas recebem lançamentos por meio da emissão de documentos contábeis no Siafi. A tela abaixo mostra um exemplo de movimentação em uma das unidades do órgão 24000 (MCTI).
+
+![Movimentação do caixa no Siafi](imgs/siafi01.png)
+
+Na extração dos dados do Siafi, os valores estão consolidados por dia, por órgão e por informação (Caixa ou Obrigações). Mas observe-se que seria possível analisar os dados considerando ainda os níveis de documento (o que faremos na [seção final deste documento](#final)), unidade gestora, fonte de recursos e vinculação de pagamento (classificadores típicos da programação financeira).
+
+A tabela abaixo apresenta uma amostra dos dados extraídos do Siafi que serão utilizados.
 
 ```{r message=FALSE, warning=FALSE}
 
@@ -84,7 +116,7 @@ nomes_orgaos$codOrgao <- as.character(nomes_orgaos$codOrgao)
 
 # mostrar a tabela do Siafi
 
-head(dados_Siafi, 5)
+tail(dados_Siafi, 5)
 ```
 
 Vamos tratar os dados para obter uma matriz com os saldos diários do caixa, das obrigações a pagar e do saldo líquido (a diferença entre o caixa e as obrigações a pagar) para todo o período considerado, por órgão do MCTI.
@@ -136,7 +168,16 @@ dados <- dados_Siafi %>%
 # (6) agora, de maneira semelhante, uso o "-" para dizer que quero empilhar todas as colunas, exceto as colunas de data numeria e de data.
 ```
 
-Em seguida, vamos calcular alguns sumários estatísticos (mínimos, máximos, médias e medianas) por órgão, para todo o período, e vamos terminar de preparar os dados para visualizá-los.
+Ficamos então com um conjunto de dados com o seguinte formato:
+
+```{r message=FALSE, warning=FALSE}
+head(dados)
+write.csv2(dados, "dados.csv")
+```
+
+Esses dados podem ser baixados clicando-se [aqui](dados.csv).
+
+Em seguida, vamos calcular alguns sumários estatísticos (mínimos, máximos, médias e medianas) por órgão, para todo o período, e vamos terminar de preparar os dados para começar a visualizá-los.
 
 ```{r message=FALSE, warning=FALSE}
 # elaborar sumários para gráficos (e para ordenar os órgãos por média descrescente)
@@ -161,24 +202,28 @@ sumario_dados <- dados %>%
 sumario_barplot <- sumario_dados %>%
   select(codOrgao, nomeOrgao, siglaOrgao, Orgao, media, media_obrig) %>%
   gather(c(media, media_obrig), key = variavel, value = valor) %>%
-  mutate(variavel = factor(variavel, levels = c("media_obrig", "media"))) # (1)
+  mutate(variavel = factor(variavel, levels = c("media_obrig", "media"))) # (2)
 
 # (1) só para mudar a ordem das barras no plot logo abaixo.
   
 dados <- dados %>%
   left_join(sumario_dados)
 
-# (1) tem um jeito melhor de ordenar vários factors pelo mesmo critério? talvez com purr::map()...
+# (2) tem um jeito melhor de ordenar vários factors pelo mesmo critério? talvez com purr::map()...
+
+cores <- RColorBrewer::brewer.pal(3, "Set2")
+nomes_series <- c("Caixa", "Obrigacoes", "Saldo")
+names(cores) <- nomes_series
 
 ```
 
-### Saldos diários dos caixas dos órgãos
+### Uma visão geral: médias para o período
 
 O gráfico abaixo demonstra as médias dos saldos diários da conta de limite de saque (que representa a parcela da Conta Única da União atribuida ao órgão) dos órgãos do MCTI no período considerado.
 
 ```{r message=FALSE, warning=FALSE, fig.height=6}
 
-cores_barras <- c("media_obrig" = "firebrick", "media" = "dodgerblue")
+cores_barras <- c("media_obrig" = cores[["Obrigacoes"]], "media" = cores[["Caixa"]])
 
 graf_barras <- function(dados_plot, complemento_titulo) {
   ggplot(dados_plot, aes(y = valor, x = siglaOrgao, fill = variavel)) +
@@ -210,46 +255,48 @@ graf_barras <- function(dados_plot, complemento_titulo) {
 graf_barras(sumario_barplot, "órgãos do MCTI")
 ```
 
+Como se vê, a Anatel apresenta valores muito superiores aos dos demais órgãos. Refazendo o gráfico para os demais órgãos.
+
 ```{r message=FALSE, warning=FALSE, fig.height = 6}
-graf_barras(sumario_barplot %>% filter(codOrgao != "41231"), "órgãos do MCTI (exceto ANATEL")
+graf_barras(sumario_barplot %>% filter(codOrgao != "41231"), "órgãos do MCTI (exceto ANATEL)")
 ```
 
-<pegar os dados das despesas inscristas em RPP!>
+### Saldos diários dos caixas dos órgãos
 
-O gráfico acima demonstra a média, mas para ter uma melhor ideia da distribuição desses valores no período, elaboramos o gráfico abaixo com todos os saldos diários de cada órgão do MCTI plotados. O valor do saldo financeiro para cada dia é representado por uma linha clara. Concentrações de saldos numa mesma faixa de valores produzem regiões mais escuras. O gráfico utiliza uma escala logarítmica, para permitir uma melhor visualização de todos os órgãos, em razão da discrepância dos saldos observados em cada órgão.
+O gráfico acima demonstra a média, mas para ter uma melhor ideia da distribuição desses valores no período, elaboramos o gráfico abaixo com todos os saldos diários de cada órgão do MCTI plotados. O valor do caixa para cada dia é representado por uma linha clara. Concentrações de saldos numa mesma faixa de valores produzem regiões mais escuras. O gráfico utiliza uma escala logarítmica, para permitir uma melhor visualização de todos os órgãos, em razão da grande diferença entre a magnitude dos saldos observados em cada órgão.
 
 ```{r message=FALSE, warning=FALSE}
 
 qde_orgaos <- length(unique(dados$Orgao))
 
-graf_estatico <- ggplot(dados, aes(y = Saldo, x = siglaOrgao)) +
-  geom_tile(aes(y = round(Saldo,0)), fill = "darkgoldenrod", alpha = 0.1, width = 1, height = 0.01) +
+graf_estatico <- ggplot(dados, aes(y = Caixa, x = siglaOrgao)) +
+  geom_tile(aes(y = round(Caixa,0)), fill = cores["Caixa"], alpha = 0.1, width = 1, height = 0.01) +
   coord_flip() +
-  geom_hline(yintercept = min(dados$Saldo), linetype = "dotted") +
-  geom_hline(yintercept = mean(dados$Saldo), linetype = "dotted") +
-  geom_hline(yintercept = median(dados$Saldo), linetype = "dotted") +
-  annotate(geom = "text", x = qde_orgaos + 1, y = min(dados$Saldo), 
+  geom_hline(yintercept = min(dados$Caixa), linetype = "dotted") +
+  geom_hline(yintercept = mean(dados$Caixa), linetype = "dotted") +
+  geom_hline(yintercept = median(dados$Caixa), linetype = "dotted") +
+  annotate(geom = "text", x = qde_orgaos + 1, y = min(dados$Caixa), 
            label = paste("Mínimo geral: ", 
-                         format(round(min(dados$Saldo),0), 
+                         format(round(min(dados$Caixa),0), 
                                 big.mark = ".", decimal.mark = ",")),
-           color = "grey50", size = 2, hjust = 0,
+           color = "grey50", size = 3, hjust = 0,
            family = "Source Sans Pro") +
-  annotate(geom = "text", x = qde_orgaos + 1, y = mean(dados$Saldo), 
+  annotate(geom = "text", x = qde_orgaos + 1, y = mean(dados$Caixa), 
            label = paste("Média geral: ", 
-                         format(round(mean(dados$Saldo),0), 
+                         format(round(mean(dados$Caixa),0), 
                                 big.mark = ".", decimal.mark = ",")),
-           color = "grey50", size = 2, hjust = 0,
+           color = "grey50", size = 3, hjust = 0,
            family = "Source Sans Pro") +
-  annotate(geom = "text", x = qde_orgaos + 1, y = median(dados$Saldo), 
+  annotate(geom = "text", x = qde_orgaos + 1, y = median(dados$Caixa), 
            label = paste("Mediana geral: ", 
-                         format(round(median(dados$Saldo),0), 
+                         format(round(median(dados$Caixa),0), 
                                 big.mark = ".", decimal.mark = ",")),
-           color = "grey50", size = 2, hjust = 0,
+           color = "grey50", size = 3, hjust = 0,
            family = "Source Sans Pro") +
   scale_y_log10(labels = function(x) {format(x, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
   labs(y = "Valores em R$ (escala logarítmica)",
        x = NULL,
-       title = "Saldos financeiros diários - Ministério da Ciência e Tecnologia",
+       title = "Caixa diário - Ministério da Ciência e Tecnologia da Informação",
        subtitle = "Período de janeiro de 2017 a agosto de 2018") +
   expand_limits(y = max(dados$Saldo) * 2, x = qde_orgaos + 1.2) + 
   tema() + theme(legend.position = "none")
@@ -260,27 +307,27 @@ graf_estatico
 O mesmo gráfico, porém com a inclusão de diagramas de caixas, indicando medianas, quartis, mínimos, máximos e outliers.
 
 ```{r message=FALSE, warning=FALSE}
-graf_estatico + geom_boxplot()
+graf_estatico + geom_boxplot(color = "darkgrey")
 ```
 
 Por fim, uma animação que mostra a evolução dos valores diários no tempo, com a indicação dos valores mínimos (em <span style="color: firebrick;">vermelho</span>) e máximos <span style="color: navy;">azul</span>.
 
 ```{r message=FALSE, warning=FALSE}
 graf_gif <- graf_estatico +
-  geom_tile(aes(y = ifelse(Date>data_min,minimo,NA)), fill = "firebrick", alpha = 0.4, width = 1, height = 0.03) +
-  geom_tile(aes(y = ifelse(Date>data_max,maximo,NA)), fill = "navy", alpha = 0.4, width = 1, height = 0.03) +  
-  geom_text(aes(y = ifelse(Date>data_min,minimo * 0.95,NA), 
+  geom_tile(aes(y = ifelse(Date>data_min, minimo,NA)), fill = "firebrick", alpha = 0.4, width = 1, height = 0.03) +
+  geom_tile(aes(y = ifelse(Date>data_max, maximo,NA)), fill = "navy", alpha = 0.4, width = 1, height = 0.03) +  
+  geom_text(aes(y = ifelse(Date>data_min, minimo * 0.95,NA), 
                 label = paste(format(round(minimo/1000000,1), big.mark = ".", decimal.mark=",", scientific = FALSE), "mi")), 
             hjust = 1,
-            size = 3, 
+            size = 4, 
             family = "Source Sans Pro",
             fontface = "plain",
             color = "firebrick"
             ) +
-  geom_text(aes(y = ifelse(Date>data_max,maximo * 1.05,NA), 
+  geom_text(aes(y = ifelse(Date>data_max, maximo * 1.05,NA), 
                 label = paste(format(round(maximo/1000000,1), big.mark = ".", decimal.mark=",", scientific = FALSE), "mi")), 
             hjust = 0,
-            size = 3, 
+            size = 4, 
             family = "Source Sans Pro",
             fontface = "plain",
             color = "navy"
@@ -295,9 +342,7 @@ animate(graf_gif, nframes = 200, height = 480, width = 672)
 
 ## Análise do caixa em relação às obrigações a pagar
 
-Carga de dados a partir do Siafi.
-
-### Gif
+### Evolução no período considerado
 
 ```{r}
 triangulo_superior <- data.frame("x" = c(1, 1e+10, 1),
@@ -307,12 +352,14 @@ triangulo_inferior <- data.frame("x" = c(1, 1e+10, 1e+10),
                                  "y" = c(1, 1e+10, 1))
 ```
 
-Gráfico estático para um dia. Melhorar...limites estão fixos :/
+Vamos visualizar a evolução da situação de cada órgão em relação às suas obrigações e disponibilidades financeiras ao longo do tempo. Primeiramente, vamos considerar a posição para um dia específico. 
+
+(explicar melhor)
 
 ```{r}
 ggplot(dados %>% filter(Date == "2017-01-02"),
        aes(y = Caixa, 
-           x = Obrigacoes)) + # color = Caixa > Obrigacoes
+           x = ifelse(Obrigacoes <= 0, 1, Obrigacoes))) + # color = Caixa > Obrigacoes
   geom_polygon(data = triangulo_superior, 
                aes(x = x, y = y),
                fill = "dodgerblue",
@@ -323,19 +370,24 @@ ggplot(dados %>% filter(Date == "2017-01-02"),
                alpha = 0.1) +
   geom_label(aes(fill = siglaOrgao, label = siglaOrgao), color = "white", size = 3) +
   geom_abline(intercept = 0, slope = 1, linetype="dotted") +
-  scale_x_log10(limits=c(1e+05,5e+10), 
+  scale_x_log10(limits=c(1, 1e+10), 
                 labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
-  scale_y_log10(limits=c(1e+05,5e+10),
+  scale_y_log10(limits=c(1, 1e+10),
                 labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
   scale_fill_manual(values = c("AEB" = "cyan", 
-                               "MCTI" = "dodgerblue", 
+                               "MCTI" = "dodgerblue",
+                               "SPOA" = "dodgerblue",
                                "ANATEL" = "firebrick", 
                                "NUCLEBRAS" = "darkcyan",
                                "INB" = "darkturquoise",
+                               "INPE" = "gray",
+                               "FINTEL" = "coral",
                                "FUST" = "coral",
                                "FUNTTEL" = "coral",
                                "FNDCT" = "coral",
-                               "CNDCT" = "gray",
+                               "CTI" = "gray",
+                               "CEITEC " = "gray",
+                               "CNPq" = "gray",
                                "CNEN" = "darkgray",
                                "CNTEA" = "lightslategray")) +
   labs(y = "Caixa (R$ mil)",
@@ -345,42 +397,42 @@ ggplot(dados %>% filter(Date == "2017-01-02"),
   tema() + theme(legend.position = "none")
 ```
 
-
-O gráfico
+Agora a evolução no período
 
 ```{r message=FALSE, warning=FALSE}
 
-min(dados$Caixa, dados$Obrigacoes)
-
-# min(subset(dados, dados$siglaOrgao == "ANATEL")$Caixa)
-
-
 scat <- ggplot(dados,
        aes(y = Caixa, 
-           x = Obrigacoes)) + # color = Caixa > Obrigacoes
+           x = ifelse(Obrigacoes <= 0, 1, Obrigacoes))) + # color = Caixa > Obrigacoes
   geom_polygon(data = triangulo_superior, 
                aes(x = x, y = y),
                fill = "dodgerblue",
                alpha = 0.1) +
   geom_polygon(data = triangulo_inferior, 
-               aes(x = x, y = y),
+               aes(x = x,
+                   y = y),
                fill = "red",
                alpha = 0.1) +
   geom_label(aes(fill = siglaOrgao, label = siglaOrgao), color = "white", size = 3) +
   geom_abline(intercept = 0, slope = 1, linetype="dotted") +
-  scale_x_log10(limits=c(5e+02,1e+10), 
+  scale_x_log10(limits=c(1,1e+10), 
                 labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
-  scale_y_log10(limits=c(5e+02,1e+10),
+  scale_y_log10(limits=c(1,1e+10),
                 labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
   scale_fill_manual(values = c("AEB" = "cyan", 
-                               "MCTI" = "dodgerblue", 
+                               "MCTI" = "dodgerblue",
+                               "SPOA" = "dodgerblue",
                                "ANATEL" = "firebrick", 
                                "NUCLEBRAS" = "darkcyan",
                                "INB" = "darkturquoise",
+                               "INPE" = "gray",
+                               "FINTEL" = "coral",
                                "FUST" = "coral",
                                "FUNTTEL" = "coral",
                                "FNDCT" = "coral",
-                               "CNDCT" = "gray",
+                               "CTI" = "gray",
+                               "CEITEC " = "gray",
+                               "CNPq" = "gray",
                                "CNEN" = "darkgray",
                                "CNTEA" = "lightslategray")) +
   labs(y = "Caixa (R$ mil)",
@@ -399,28 +451,32 @@ anim_save("scat2.gif", animation = last_animation())
 
 ### Connected Scatterplot
 
-Um gráfico de dispersão conectado, exemplo para um órgão.
+Para mostrar a trajetória (e ilustrar a frequência de permanência em cada zona de saldos positivos ou negativos)...
+
+Para um único órgão
 
 ```{r}
 
 plot_connected_scatterplot <- function(dados){
   ggplot(dados,
-         aes(y = Caixa, 
-             x = Obrigacoes)) + # color = Caixa > Obrigacoes
+       aes(y = Caixa, 
+           x = ifelse(Obrigacoes <= 0, 1, Obrigacoes))) + # color = Caixa > Obrigacoes
     geom_polygon(data = triangulo_superior, 
-                 aes(x = x, y = y),
+                 aes(x = x, 
+                     y = y),
                  fill = "dodgerblue",
                  alpha = 0.1) +
     geom_polygon(data = triangulo_inferior, 
-                 aes(x = x, y = y),
+                 aes(x = x, 
+                     y = y),
                  fill = "red",
                  alpha = 0.1) +
     geom_path(color = "gray") +
     geom_point(aes(color = Caixa > Obrigacoes), alpha = 0.7) +
     geom_abline(intercept = 0, slope = 1, linetype="dotted") +
-    scale_x_log10(limits=c(1e+03,1e+10),
+    scale_x_log10(limits=c(1,1e+10),
                   labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
-    scale_y_log10(limits=c(1e+03,1e+10),
+    scale_y_log10(limits=c(1,1e+10),
                   labels = function(x) {format(x/1000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
     scale_color_manual(values = c("TRUE" = "dodgerblue", "FALSE" = "red"),
                        guide = FALSE) +
@@ -439,67 +495,17 @@ E para todos os órgãos?
 plot_connected_scatterplot(dados) + facet_wrap(~ siglaOrgao, ncol = 3)
 ```
 
-### Dygraphs - linha
-
-gráficos de linha. Para o MCTI como um todo. (shiny com a opção de selecionar o órgão?)
-
-```{r}
-
-dados_xts_MCTI <- dados %>% 
-  group_by(Date) %>%
-  summarise(Caixa      = sum(Caixa),
-            Obrigacoes = sum(Obrigacoes)) %>%
-  ungroup()
-
-sh_xts <- xts(dados_xts_MCTI[,-1], order.by = dados_xts_MCTI$Date)
-
-dygraph(sh_xts) %>%
-    dyHighlight(highlightCircleSize = 5, 
-                highlightSeriesBackgroundAlpha = 0.2,
-                highlightSeriesOpts = list(strokeWidth = 3),
-                hideOnMouseOut = FALSE) %>%
-    dyAxis("y",
-           pixelsPerLabel = 40, 
-           gridLineColor = "rgb(222,222,222)", 
-           axisLineColor = "white") %>% 
-    dyAxis("x", 
-           pixelsPerLabel = 40, 
-           gridLineColor = "rgb(222,222,222)", 
-           rangePad = 5,
-           axisLineColor = "white") %>% 
-    dyLegend(show = "always") %>%
-    dyRangeSelector()
+### Visualizando órgão a órgão
 
 
-
-```
-
-só a direta
 
 ```{r}
 dados_xts_MCTI_direta <- dados %>% 
   filter(codOrgao == "24000") %>%
-  select(Date, Caixa, Obrigacoes)
+  select(Date, Caixa, Obrigacoes, Saldo)
 
-sh_xts_direta <- xts(dados_xts_MCTI_direta[,-1], order.by = dados_xts_MCTI$Date)
-sh_xts_direta$saldo <- sh_xts_direta$Caixa - sh_xts_direta$Obrigacoes
+sh_xts_direta <- xts(dados_xts_MCTI_direta[,-1], order.by = dados_xts_MCTI_direta$Date)
 
-dygraph(sh_xts_direta[,3]) %>%
-    dyHighlight(highlightCircleSize = 5, 
-                highlightSeriesBackgroundAlpha = 0.2,
-                highlightSeriesOpts = list(strokeWidth = 3),
-                hideOnMouseOut = FALSE) %>%
-    dyAxis("y",
-           pixelsPerLabel = 40, 
-           gridLineColor = "rgb(222,222,222)", 
-           axisLineColor = "white") %>% 
-    dyAxis("x", 
-           pixelsPerLabel = 40, 
-           gridLineColor = "rgb(222,222,222)", 
-           rangePad = 5,
-           axisLineColor = "white") %>% 
-    dyLegend(show = "always") %>%
-    dyRangeSelector()
 ```
 
 ### Calendar heatmap
@@ -509,8 +515,7 @@ caixa - obrigações
 ```{r}
 library(ggTimeSeries)
 
-dados_xts_MCTI_direta_heatmap <- dados_xts_MCTI_direta %>%
-  mutate(Saldo = Caixa - Obrigacoes)
+dados_xts_MCTI_direta_heatmap <- dados_xts_MCTI_direta 
 
 ggplot_calendar_heatmap(
   dados_xts_MCTI_direta_heatmap,
@@ -628,11 +633,11 @@ ggplot(sumario_CxLiq_plot %>% filter(siglaOrgao != "ANATEL"),
          x = "Quantidade de dias",
          title = "Caixa x Obrigações a pagar",
          subtitle = "Média e quantidade de dias com saldo positivo e negativo") +
-  tema() + facet_wrap(~ siglaOrgao, ncol = 1)
+  tema() + facet_wrap(~ siglaOrgao, ncol = 3)
 ```
 
 
-## Visualização de todas as movimentações financeiras de um órgão
+## Visualização de todas as movimentações financeiras de um órgão {#final}
 
 Nesta seção, vamos tentar analisar com mais detalhe as movimentações de um único órgão, construindo uma visualização que demonstre todos os pagamentos e recebimentos, além dos saldos financeiros, dia a dia. 
 
@@ -763,9 +768,9 @@ O gráfico abaixo demonstra, de forma experimental, as movimentações diárias 
 * linhas pontilhadas <span style="color: firebrick;">vermelhas</span> representam recursos financeiros transferidos para outros órgãos;
 * as linhas <span style="color: grey70;">cinzas</> representam outras movimentações.
 
-```{r fig.height=20, fig.width=11, message=FALSE, warning=FALSE}
+```{r fig.height=17, fig.width=11, message=FALSE, warning=FALSE}
 
-dados_plot <- dados_fluxo %>% filter(Date <= "2017-04-30")
+dados_plot <- dados_fluxo %>% filter(Date <= "2017-03-31")
 
 minimo <- min(dados_plot$Saldo)
 media <- mean(dados_plot$Saldo)
@@ -877,3 +882,11 @@ ggplot(dados_plot, aes(y = data_num, yend = data_num)) +
 * animações: 
 - https://www.idg.tv/video/89987/r-tip-animations-in-r
 - https://www.jumpingrivers.com/blog/r-gganimate-premier-league/
+* https://rmarkdown.rstudio.com/authoring_shiny
+* https://shiny.rstudio.com/reference/shiny/1.0.5/
+* https://shiny.rstudio.com/reference/shiny/1.0.5/radioButtons.html
+* https://rstudio.github.io/dygraphs/shiny.html
+https://rstudio.github.io/dygraphs/gallery-series-options.html
+* xts::endpoints
+* [Manipulating Time Series Data in R with xts & zoo](http://rstudio-pubs-static.s3.amazonaws.com/288218_117e183e74964557a5da4fc5902fc671.html)
+* para o dygraphs: https://pt.stackoverflow.com/questions/188190/formatar-moeda-com-separador-de-milhar (mas não funcionou)

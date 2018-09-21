@@ -64,3 +64,9 @@ ggplot(sumario_dados, aes(y = media, x = siglaOrgao)) +
        subtitle = "Período de janeiro de 2017 a agosto de 2018") +
   expand_limits(y = max(sumario_dados$media * 1.1)) +
   tema() + theme(legend.position = "none")
+
+
+for (i in 1:length(lista_xts)){
+  print(lista_xts[[i]]["2017-11-30",2])}
+
+lista_xts[[1]]["2018-08-31"]

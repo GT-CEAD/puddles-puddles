@@ -67,12 +67,41 @@ lista_orgaos <- unique(dados_CxLiq$codOrgao)
 gera_xts <- function(orgao) {
   dados_xts <- dados_CxLiq %>% 
         filter(codOrgao == orgao) %>%
-        select(Date, Caixa, Obrigacoes, Saldo)
+        select(Date, Caixa, Obrigacoes, Saldo) %>%
+        mutate_at(-1, funs(./1000000))
   sh_xts <- xts(dados_xts[,-1], order.by = dados_xts$Date)
 }
 
 lista_xts <- lapply(lista_orgaos, gera_xts)
 names(lista_xts) <- lista_orgaos
+
+
+# gerar um total
+xts_total <- lista_xts[[1]]
+for (i in 2:length(lista_xts)) {
+  xts_total <- xts_total + lista_xts[[i]]
+}
+
+xts_total_semAnatel <- xts_total - lista_xts[["41231"]]
+
+lista_xts[[length(lista_xts)+1]] <- xts_total_semAnatel
+lista_xts[[length(lista_xts)+1]] <- xts_total
+
+lista_orgaos <- c(lista_orgaos, "Total sem Anatel", "Total")
+names(lista_xts) <- lista_orgaos
+
+# para conferir
+
+head(xts_total)
+
+dados_CxLiq %>% 
+  filter(Date <= "2017-01-06") %>% 
+  group_by(Date) %>% 
+  summarise_at(c("Caixa", "Obrigacoes", "Saldo"), sum)
+
+cores <- RColorBrewer::brewer.pal(3, "Set2")
+nomes_series <- c("Caixa", "Obrigacoes", "Saldo")
+names(cores) <- nomes_series
 
 ```
 
@@ -88,28 +117,59 @@ You can embed Shiny inputs and outputs in your document. Outputs are automatical
 
 ```{r eruptions, echo=FALSE}
 inputPanel(
-  selectInput("orgao", label = "Órgão desejado:",
-              choices = unique(dados_CxLiq$codOrgao), selected = unique(dados_CxLiq$codOrgao)[1])
+  selectInput("orgao", label = "Órgão do MCTI:",
+              choices = lista_orgaos, selected = lista_orgaos[1]),
+  radioButtons("periodicidade", label = "Periodicidade", 
+               choiceNames = c("Diários", "Semanais", "Mensais"),
+               choiceValues = c("days", "weeks", "months"),
+               selected = "days"),
+  checkboxGroupInput("variavel", label = "Série", 
+                     choiceNames  = c("Caixa", "Obrigações", "Saldo"),
+                     choiceValues = c("Caixa", "Obrigacoes", "Saldo"),
+                     selected     = c("Caixa", "Obrigacoes", "Saldo"))
 )
 
 renderDygraph({
   
-  dygraph(lista_xts[[input$orgao]]) %>%
+  xts_selecionado <- lista_xts[[input$orgao]][endpoints(lista_xts[[input$orgao]], on = input$periodicidade), # (1)
+                                              input$variavel]
+  
+  # xts_selecionado <- lista_xts[[input$orgao]]
+  
+  dygraph(xts_selecionado) %>%
+      dyOptions(colors = RColorBrewer::brewer.pal(3, "Set2"),
+                drawAxesAtZero = TRUE) %>%
       dyHighlight(highlightCircleSize = 5,
-                  highlightSeriesBackgroundAlpha = 0.2,
+                  highlightSeriesBackgroundAlpha = 0.4,
                   highlightSeriesOpts = list(strokeWidth = 3),
                   hideOnMouseOut = FALSE) %>%
       dyAxis("y",
+             label = "R$ milhões",
              pixelsPerLabel = 40,
              gridLineColor = "rgb(222,222,222)",
-             axisLineColor = "white") %>%
+             axisLineColor = "white",
+             valueFormatter = "function(y) {
+                  return 'R$' + y.toFixed(2) + ' mi';
+                }") %>%
       dyAxis("x",
              pixelsPerLabel = 40,
              gridLineColor = "rgb(222,222,222)",
              rangePad = 5,
-             axisLineColor = "white") %>%
+             axisLineColor = "rgb(24,24,24)") %>%
       dyLegend(show = "always") %>%
       dyRangeSelector()
 })
+
+#       dyLimit(0, color = "") %>%
+# (1) para indexar o xts desejado na lista de xts, usa-se, por exemplo lista_xts[[1]].
+#     para selecionar uma coluna específica desses xts, usa-se, por exemplo lista_xts[[1]][,1] (ele não considera as datas como coluna, mind you)
+#
+# então, esse código faz o seguinte:
+#
+# lista_xts[[indexador]] : seleciona o xts desejado, conforme a seleção do usuário
+# lista_xts[[indexador]][, coluna] : seleciona a coluna desejada do xts desejado, conforme seleções
+# lista_xts[[indexador]][vetor_de_datas, coluna] : seleciona a coluna desejada do xts desejado para as datas desejadas, conforme o resultado da função "endpoints" a partir da seleção do usuário
+#
+# para fixar as cores: dySeries("Caixa", color = cores[1]). mas aí a seleção de series não funciona.
 ```
 
