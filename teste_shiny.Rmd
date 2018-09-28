@@ -131,11 +131,15 @@ inputPanel(
 
 mainPanel(
       dygraphOutput("dygraph"),
-      tableOutput("tsa")
+      tableOutput("tsa"),
+      width = 12
 )
 
 output$tsa <- renderTable({
-  head(dados_CxLiq %>% filter(data_num == strftime(req(input$dygraph_click$x), "%Y%m%d")))
+  data <- strftime(req(input$dygraph_click$x), "%Y%m%d")
+  if (is.na(data)) {data <- "20170101"}
+  head(dados_CxLiq %>% filter(data_num == data) %>%
+         arrange(Obrigacoes))
   })
 
 output$dygraph <- renderDygraph({

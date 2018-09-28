@@ -12,6 +12,10 @@ body {
   font-family: "Source Sans Pro";
 }
 
+table {
+  font-size: 0.75rem;
+}
+
 .dygraph-legend, .dygraph-axis-label {
   font-family: "Source Sans Pro";
 }
@@ -965,7 +969,7 @@ ggplot(dados_plot, aes(y = data_num, yend = data_num)) +
 ### Movimentações
 
 ```{r}
-tem que melhorar tudo isso. tem um processamento inicial, e daí ramifica para os usos específicos, o plot, o xts e a tabvela de documentos. Hoje tem várias repetições desnecessárias.
+# tem que melhorar tudo isso. tem um processamento inicial, e daí ramifica para os usos específicos, o plot, o xts e a tabvela de documentos. Hoje tem várias repetições desnecessárias.
 
 dados_fluxo_xts <- dados_fluxo %>%
   select(-c(SaldoAbertura:data_num)) %>%
@@ -992,14 +996,46 @@ dados_documentos <- dados_fluxo_Siafi %>%
                             as.Date(paste0(str_sub(Data, 5, 8),"-01-01")),
                             dmy(Data))) %>%
   left_join(tab_class_movimentos) %>%
-  select(Date, tipoMov, classMovimento, tipoDoc_, Documento, docObservacao, Movimento)
+  arrange(desc(abs(Movimento))) %>%
+  mutate(Date = as.character(Date),
+         Valor = format(Movimento, big.mark = ".", decimal.mark = ",")) %>%
+  select(Date, 
+         `Tipo de Movimento` = tipoMov, 
+         `Classificação` = classMovimento, 
+         `Tipo de Documento` = tipoDoc_, 
+         Documento, 
+         `Descrição` = docObservacao,
+         Valor)
 
 
 ```
 
 ```{r shiny2, message=FALSE, warning=FALSE}
-renderDygraph({
-  
+mainPanel(
+      dygraphOutput("dygraph"),
+      textOutput("mensagem"),
+      tableOutput("tabelinha"),
+      width = 12
+)
+
+output$mensagem <- renderText({
+  data <- strftime(req(input$dygraph_click$x), "%Y-%m-%d")
+  if (is.na(data)) {data <- "2017-01-01"}
+  tabela <- dados_documentos %>% 
+    filter(Date == data)
+  paste(dim(tabela)[1], "documentos(s) movimentaram o caixa no dia", data, ":")
+})
+
+# melhorar isso, repeti o código nos dois outputs por puro desconhecimento.
+
+output$tabelinha <- renderTable({
+  data <- strftime(req(input$dygraph_click$x), "%Y-%m-%d")
+  if (is.na(data)) {data <- "2017-01-01"}
+  dados_documentos %>% 
+    filter(Date == data)
+  })
+
+output$dygraph <- renderDygraph({
   dygraph(dados_fluxo_xts) %>%
       dyOptions(colors = RColorBrewer::brewer.pal(2, "Set2"),
                 drawAxesAtZero = TRUE) %>%
@@ -1023,9 +1059,6 @@ renderDygraph({
       dyBarChart()
 })
 
-renderTable({
-  head(cars, input$rows)
-})
 
 ```
 
