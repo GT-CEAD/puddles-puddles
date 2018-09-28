@@ -8,12 +8,13 @@ runtime: shiny
 ---
 
 ```{css, echo=FALSE}
+
 body {
   font-family: "Source Sans Pro";
 }
 
-table {
-  font-size: 0.75rem;
+.shiny-table {
+  font-size: 10pt;
 }
 
 .dygraph-legend, .dygraph-axis-label {
@@ -34,7 +35,7 @@ h1, h2,h3,h4 {
 
 h1, h2 {
   font-weight: bold;
-  font-family: "Oswald";
+  font-family: 'Josefin Sans', sans-serif;
 }
 
 blockquote {
@@ -43,6 +44,11 @@ blockquote {
 }
 
 ```
+
+<style>
+@import url('https://fonts.googleapis.com/css?family=Oswald');
+@import url('https://fonts.googleapis.com/css?family=Josefin+Sans');
+</style>
 
 ```{r message=FALSE, warning=FALSE}
 library(tidyverse)
@@ -63,7 +69,7 @@ tema <- function(){
     theme(
       text = element_text(family = "Source Sans Pro", colour = "grey20"),
       axis.text = element_text(family = "Source Sans Pro", colour = "grey20"),
-      title = element_text(face = "bold", size = 10), # size para o Shiny
+      title = element_text(face = "bold"), # size para o Shiny
       plot.subtitle = element_text(face = "plain", size = 9),
       plot.caption = element_text(face = "italic"),
       panel.grid.major = element_blank(), 
@@ -309,7 +315,7 @@ graf_estatico <- ggplot(dados, aes(y = Caixa, x = siglaOrgao)) +
   scale_y_log10(labels = function(x) {format(x, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
   labs(y = "Valores em R$ (escala logarítmica)",
        x = NULL,
-       title = "Caixa diário - Ministério da Ciência e Tecnologia da Informação",
+       title = "Caixa diário - Órgãos do MCTI",
        subtitle = "Período de janeiro de 2017 a agosto de 2018") +
   expand_limits(y = max(dados$Saldo) * 2, x = qde_orgaos + 1.2) + 
   tema() + theme(legend.position = "none")
@@ -407,10 +413,10 @@ ggplot(dados %>% filter(Date == "2017-01-02"),
                                "CNPq" = "gray",
                                "CNEN" = "darkgray",
                                "CNTEA" = "lightslategray")) +
-  labs(y = "Caixa (R$ mil)",
-       x = "Obrigações a pagar (R$ mil)",
-       title = "Caixa e obrigações (decorrentes da execução orçamentária) a pagar dos órgãos do MCTI",
-       subtitle = "Saldos diários em {frame_time}") +
+  labs(y = "Caixa (R$ mil, log)",
+       x = "Obrigações a pagar (R$ mil, log)",
+       title = "Caixa e obrigações a pagar dos órgãos do MCTI",
+       subtitle = "Saldos no dia 2017-01-02") +
   tema() + theme(legend.position = "none")
 ```
 
@@ -501,7 +507,8 @@ plot_connected_scatterplot <- function(dados){
                        guide = FALSE) +
     labs(y = "Caixa (R$ mil)",
          x = "Obrigações a pagar (R$ mil)",
-         title = "Caixa x Obrigações (decorrentes da execução orçamentária) a pagar") +
+         title = "Caixa x Obrigações a pagar",
+         subtitle = "Eixos em escala logarítmica") +
     tema()
 }
 
@@ -1035,6 +1042,8 @@ output$tabelinha <- renderTable({
     filter(Date == data)
   })
 
+# colocar um formattable
+
 output$dygraph <- renderDygraph({
   dygraph(dados_fluxo_xts) %>%
       dyOptions(colors = RColorBrewer::brewer.pal(2, "Set2"),
@@ -1106,3 +1115,6 @@ https://rstudio.github.io/dygraphs/gallery-series-options.html
 * xts::endpoints
 * [Manipulating Time Series Data in R with xts & zoo](http://rstudio-pubs-static.s3.amazonaws.com/288218_117e183e74964557a5da4fc5902fc671.html)
 * para o dygraphs: https://pt.stackoverflow.com/questions/188190/formatar-moeda-com-separador-de-milhar (mas não funcionou)
+* https://rstudio.github.io/dygraphs/shiny.html
+* https://gallery.shinyapps.io/093-plot-interaction-basic/
+* https://cran.r-project.org/web/packages/formattable/vignettes/formattable-data-frame.html
