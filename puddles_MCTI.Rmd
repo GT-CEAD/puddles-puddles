@@ -62,7 +62,10 @@ library(ggrepel)
 library(xts)
 library(dygraphs)
 library(formattable)
+library(DT)
 loadfonts()
+
+options(shiny.usecairo=FALSE)
 
 tema <- function(){
     theme_minimal() +
@@ -623,7 +626,6 @@ dados_xts_MCTI_direta <- dados %>%
   filter(codOrgao == "24000") %>%
   select(Date, Caixa, Obrigacoes, Saldo)
 
-sh_xts_direta <- xts(dados_xts_MCTI_direta[,-1], order.by = dados_xts_MCTI_direta$Date)
 
 ```
 
@@ -652,6 +654,31 @@ ggplot_calendar_heatmap(
 
 #  scale_fill_continuous(low = 'red', high = 'blue') + 
 ```
+
+```{r, fig.height=20}
+
+dados_heatmap <- dados %>%
+  filter(siglaOrgao != "ANATEL") %>%
+  select(Date, siglaOrgao, Saldo) %>%
+  filter(year(Date) == 2017)
+
+ggplot_calendar_heatmap(
+  dados_heatmap,
+  'Date',
+  'Saldo',
+  monthBorderSize = 0.75,
+  dayBorderColour = "lightgrey"
+)   +
+  xlab(NULL) + 
+  ylab(NULL) + 
+  scale_fill_gradient2(labels = function(x) {format(x/1000000, big.mark = ".", decimal.mark=",", scientific = FALSE)}) +
+  tema() +
+  labs(
+    fill = "Saldo (em R$ milhões)"
+  ) +
+  facet_wrap(~siglaOrgao, ncol = 1)
+```
+
 
 
 Um sumário
@@ -1034,6 +1061,8 @@ output$mensagem <- renderText({
 })
 
 # melhorar isso, repeti o código nos dois outputs por puro desconhecimento.
+# usar datatable
+# https://rstudio.github.io/DT/
 
 output$tabelinha <- renderTable({
   data <- strftime(req(input$dygraph_click$x), "%Y-%m-%d")
@@ -1042,11 +1071,9 @@ output$tabelinha <- renderTable({
     filter(Date == data)
   })
 
-# colocar um formattable
-
 output$dygraph <- renderDygraph({
   dygraph(dados_fluxo_xts) %>%
-      dyOptions(colors = RColorBrewer::brewer.pal(2, "Set2"),
+      dyOptions(colors = RColorBrewer::brewer.pal(3, "Set2")[c(2,1)],
                 drawAxesAtZero = TRUE) %>%
       dyHighlight(highlightCircleSize = 5,
                   hideOnMouseOut = FALSE) %>%
@@ -1076,7 +1103,20 @@ output$dygraph <- renderDygraph({
 
 ## Comentários
 
+### Verificação com TG
+
+```{r}
+ultimos_dias <- seq(as.Date("2017-01-01"), length = 21, by = "1 month") - 1
+planilha <- subset(dados, dados$Date %in% ultimos_dias) %>%
+  mutate(mes = paste(year(Date),month(Date))) %>%
+  select(mes, codOrgao, Caixa, Obrigacoes, Saldo)
+write.csv2(planilha, "verifica.csv")
+```
+
+
 ### Questões a considerar
+
+* ver a questão do tamanho do texto nos gráficos. algo com o pacote Cairo.
 
 * ANATEL tem meses com saldos negativos. O Item está errado :/
 
